@@ -60,9 +60,9 @@ enable_db_sink()
 async def lifespan(app: FastAPI):
     # Startup
     BANNER = """
- ┌────────────────────────┐
+ ┌─────────────────────────────┐
  │        AutoDeskAI           │
- └───────────────────────┘
+ └─────────────────────────────┘
     """
     print(BANNER)
     logger.info("Initializing AutoDeskAI API Intelligence...")
