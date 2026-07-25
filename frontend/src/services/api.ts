@@ -1156,26 +1156,6 @@ class ApiService {
     );
   }
 
-  async cleanCsv(email: string, docId: string): Promise<{
-    cleaned_csv: string;
-    original_shape: [number, number];
-    cleaned_shape: [number, number];
-    rows_removed: number;
-    cols_removed: number;
-    issues: Array<{
-      type: string;
-      detail: string;
-      action: string;
-      count?: number;
-      mapping?: Record<string, string>;
-      by_column?: Record<string, unknown>;
-    }>;
-  }> {
-    return this.request(`/api/documents/clean/${docId}?email=${encodeURIComponent(email)}`, {
-      method: 'POST',
-    });
-  }
-
   async getCentralizedAgentStatus(email: string) {
     return this.request<{
       total_agents: number;

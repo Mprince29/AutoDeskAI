@@ -222,37 +222,6 @@ async def parse_document(
     }
 
 
-@router.post("/clean/{doc_id}")
-async def clean_csv_document(
-    doc_id: str,
-    email: str = Query(...),
-    db: Session = Depends(get_db),
-):
-    """Detect and fix common issues in an uploaded CSV file (reads from DB blob)."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    doc = _find_doc(doc_id, user.id, db)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    from pathlib import Path
-    if Path(doc.filename).suffix.lower() != ".csv":
-        raise HTTPException(status_code=400, detail="Only CSV files can be cleaned")
-
-    if not doc.content_zlib:
-        raise HTTPException(status_code=422, detail="No file content stored for this document")
-
-    try:
-        raw = zlib.decompress(doc.content_zlib)
-        from services.csv_cleaner import clean_csv
-        return clean_csv(raw)
-    except Exception as exc:
-        logger.error(f"CSV clean error for {doc_id}: {exc}")
-        raise HTTPException(status_code=500, detail=f"CSV cleaning failed: {exc}")
-
-
 @router.get("/list")
 async def list_documents(email: str, db: Session = Depends(get_db)):
     """List all documents uploaded by a user."""
