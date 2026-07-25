@@ -17,7 +17,7 @@ import {
   SiTrello,
   SiTelegram,
 } from 'react-icons/si';
-import { FaLinkedin } from 'react-icons/fa';
+// import { FaLinkedin } from 'react-icons/fa'; -- LinkedIn integration disabled
 import { FiGlobe, FiSearch } from 'react-icons/fi';
 import { BsStars } from 'react-icons/bs';
 
@@ -72,8 +72,8 @@ export const TrelloIcon = SiTrello;
 // Telegram icon
 export const TelegramIcon = SiTelegram;
 
-// LinkedIn icon
-export const LinkedInIcon = FaLinkedin;
+// LinkedIn icon disabled - LinkedIn integration disabled
+// export const LinkedInIcon = FaLinkedin;
 
 // ── Tool name → icon component mapping ────────────────────────────────────────
 export const ToolIconMap: Record<string, React.FC> = {
@@ -157,9 +157,9 @@ export const ToolIconMap: Record<string, React.FC> = {
   telegram_send_message: TelegramIcon,
   telegram_get_history: TelegramIcon,
 
-  // LinkedIn
-  post_to_linkedin: LinkedInIcon,
-  get_linkedin_profile: LinkedInIcon,
+  // LinkedIn integration disabled
+  // post_to_linkedin: LinkedInIcon,
+  // get_linkedin_profile: LinkedInIcon,
 
   // Fallback
   fallback: Zap,
@@ -238,9 +238,9 @@ export const ToolBgMap: Record<string, string> = {
   telegram_send_message: 'bg-sky-400/15 border-sky-400/30',
   telegram_get_history: 'bg-sky-400/15 border-sky-400/30',
 
-  // LinkedIn - blue-600
-  post_to_linkedin: 'bg-blue-600/15 border-blue-600/30',
-  get_linkedin_profile: 'bg-blue-600/15 border-blue-600/30',
+  // LinkedIn integration disabled
+  // post_to_linkedin: 'bg-blue-600/15 border-blue-600/30',
+  // get_linkedin_profile: 'bg-blue-600/15 border-blue-600/30',
 
   fallback: 'bg-surface border-border',
 };
@@ -314,9 +314,9 @@ export const ToolDescriptionMap: Record<string, string> = {
   telegram_send_message: 'Sending Telegram message',
   telegram_get_history: 'Reading Telegram history',
 
-  // LinkedIn
-  post_to_linkedin: 'Posting to LinkedIn',
-  get_linkedin_profile: 'Reading LinkedIn profile',
+  // LinkedIn integration disabled
+  // post_to_linkedin: 'Posting to LinkedIn',
+  // get_linkedin_profile: 'Reading LinkedIn profile',
 
   fallback: 'Processing task',
 };

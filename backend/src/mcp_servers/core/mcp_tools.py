@@ -1853,8 +1853,8 @@ async def tool_create_qbr_report_workflow(user_email: str, db, quarter: str, dep
     from services.org_tools import create_qbr_report_workflow
     return await create_qbr_report_workflow(user_email, db, quarter, department)
 
-# ── LinkedIn Tools ───────────────────────────────────────────────────────────
-import mcp_servers.tools.linkedin_tools  # registers get_linkedin_profile, post_to_linkedin, linkedin_comment_on_post, linkedin_like_post
+# ── LinkedIn Tools ─────────────────────────────────────────────────────────── (disabled)
+# import mcp_servers.tools.linkedin_tools  # registers get_linkedin_profile, post_to_linkedin, linkedin_comment_on_post, linkedin_like_post
 
 # ── Browser / Computer Use Tools ─────────────────────────────────────────────
 import mcp_servers.tools.playwright_tools  # registers browser_navigate, browser_click, browser_type, browser_extract, browser_screenshot, browser_close

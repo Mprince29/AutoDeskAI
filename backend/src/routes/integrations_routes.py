@@ -169,7 +169,7 @@ async def connect_platform(
         # Slack: add user_scope param separately (bot scopes go in scope, user scopes in user_scope)
         if config.get("user_scopes"):
             params["user_scope"] = " ".join(config["user_scopes"])
-        # Platform-specific extra params (e.g. Atlassian audience, Discord bot permissions+scope override)
+        # Platform-specific extra params (e.g. Discord bot permissions+scope override)
         extra = config.get("extra_params", {})
         params.update(extra)
 
@@ -304,7 +304,7 @@ async def oauth_callback(
                     headers=headers,
                 )
             else:
-                # Standard OAuth2: credentials in request body (GitHub, Slack, Atlassian)
+                # Standard OAuth2: credentials in request body (GitHub, Slack)
                 resp = await client.post(
                     config["oauth_token_url"],
                     data={

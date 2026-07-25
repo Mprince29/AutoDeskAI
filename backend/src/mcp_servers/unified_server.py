@@ -74,11 +74,12 @@ app.include_router(search_router, prefix="/search", tags=["Search"])
 
 # Corporate Command Center routers - each guarded so a missing library only
 # disables that platform's HTTP routes; the rest of the MCP server keeps running.
-try:
-    from mcp_servers.tools.linkedin_tools import router as linkedin_router
-    app.include_router(linkedin_router, prefix="/linkedin", tags=["LinkedIn"])
-except ImportError:
-    logger.warning("[unified_server] LinkedIn routes disabled")
+# LinkedIn integration disabled
+# try:
+#     from mcp_servers.tools.linkedin_tools import router as linkedin_router
+#     app.include_router(linkedin_router, prefix="/linkedin", tags=["LinkedIn"])
+# except ImportError:
+#     logger.warning("[unified_server] LinkedIn routes disabled")
 
 try:
     from mcp_servers.tools.github_tools import router as github_router

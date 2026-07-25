@@ -194,10 +194,10 @@ def _is_qa(text: str) -> bool:
     if _EMAIL_READ_RE.search(t):
         return False  # always route to agent so list_emails can be called
 
-    # LinkedIn / integration live-data queries always need the agent
+    # Integration live-data queries always need the agent
     _INTEGRATION_DATA_RE = re.compile(
-        r'\b(linkedin|my profile|my calendar|my contacts|my drive|my slack|'
-        r'my notion|my trello|my github)\b',  # "my jira" removed - Jira integration disabled
+        r'\b(my profile|my calendar|my contacts|my drive|my slack|'
+        r'my notion|my trello|my github)\b',  # "linkedin" and "my jira" removed - integrations disabled
         re.IGNORECASE
     )
     if _INTEGRATION_DATA_RE.search(t):

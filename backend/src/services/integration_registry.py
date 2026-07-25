@@ -24,20 +24,21 @@ test_endpoint:
 INTEGRATION_REGISTRY: dict = {
     # ── OAuth2 Platforms ───────────────────────────────────────────────────────
 
-    "linkedin": {
-        "name": "LinkedIn",
-        "description": "Post updates, share articles, and publish content to your LinkedIn feed",
-        "auth_type": "oauth2",
-        "oauth_authorize_url": "https://www.linkedin.com/oauth/v2/authorization",
-        "oauth_token_url": "https://www.linkedin.com/oauth/v2/accessToken",
-        "scopes": ["openid", "profile", "email", "w_member_social"],
-        "client_id_env": "LINKEDIN_CLIENT_ID",
-        "client_secret_env": "LINKEDIN_CLIENT_SECRET",
-        "token_path": "access_token",
-        "test_endpoint": "https://api.linkedin.com/v2/userinfo",
-        "color": "#0A66C2",
-        "icon_key": "linkedin",
-    },
+    # LinkedIn integration disabled
+    # "linkedin": {
+    #     "name": "LinkedIn",
+    #     "description": "Post updates, share articles, and publish content to your LinkedIn feed",
+    #     "auth_type": "oauth2",
+    #     "oauth_authorize_url": "https://www.linkedin.com/oauth/v2/authorization",
+    #     "oauth_token_url": "https://www.linkedin.com/oauth/v2/accessToken",
+    #     "scopes": ["openid", "profile", "email", "w_member_social"],
+    #     "client_id_env": "LINKEDIN_CLIENT_ID",
+    #     "client_secret_env": "LINKEDIN_CLIENT_SECRET",
+    #     "token_path": "access_token",
+    #     "test_endpoint": "https://api.linkedin.com/v2/userinfo",
+    #     "color": "#0A66C2",
+    #     "icon_key": "linkedin",
+    # },
 
     "slack": {
         "name": "Slack",
