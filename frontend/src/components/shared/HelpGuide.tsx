@@ -62,11 +62,10 @@ const CHAPTERS: Chapter[] = [
     color: 'text-indigo-400',
     bg: 'bg-indigo-500/10 border-indigo-500/20',
     description:
-      'The Playground contains standalone tools for specific workflows like social media intelligence.',
+      'The Playground will host standalone tools for specific workflows - more are on the way.',
     bullets: [
       'Navigate to Tools in the top menu to open the Playground',
-      'Use Social Media Intelligence for news digests and reputation scanning',
-      'Select Tools from the left sidebar to quickly access them',
+      'New specialized tools will appear here as they ship',
     ],
   },
   {

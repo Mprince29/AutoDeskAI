@@ -45,7 +45,6 @@ from routes.notification_routes import router as notification_router
 from routes.draft_routes import router as draft_router
 from routes.logging_routes import router as logging_router
 from routes.skills_routes import router as skills_router
-from routes.social_routes import router as social_router
 from auth.database import create_db_and_tables
 import models  # noqa: F401 - ensures AgentToolCallLog (and all models) are in Base.metadata
 from utils.activity_logger import record_activity
@@ -533,7 +532,6 @@ app.include_router(notification_router, prefix="/api/notifications")
 app.include_router(draft_router, prefix="/api")
 app.include_router(logging_router, prefix="/api")
 app.include_router(skills_router, prefix="/api/skills")
-app.include_router(social_router, prefix="/api/social")
 
 # MICROSOFT DISABLED - uncomment block below to re-enable
 # if os.environ.get("AZURE_CLIENT_ID"):
