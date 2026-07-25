@@ -13,7 +13,7 @@ import {
   SiGithub,
   SiSlack,
   SiDiscord,
-  SiJira,
+  // SiJira, -- Jira integration disabled
   SiTrello,
   SiTelegram,
 } from 'react-icons/si';
@@ -63,8 +63,8 @@ export const SlackIcon = SiSlack;
 // Discord icon
 export const DiscordIcon = SiDiscord;
 
-// Jira icon
-export const JiraIcon = SiJira;
+// Jira icon disabled - Jira integration disabled
+// export const JiraIcon = SiJira;
 
 // Trello icon
 export const TrelloIcon = SiTrello;
@@ -133,11 +133,11 @@ export const ToolIconMap: Record<string, React.FC> = {
   github_search_issues: GitHubIcon,
   github_get_file: GitHubIcon,
 
-  // Jira
-  jira_get_issue: JiraIcon,
-  jira_create_ticket: JiraIcon,
-  jira_search: JiraIcon,
-  jira_add_comment: JiraIcon,
+  // Jira integration disabled
+  // jira_get_issue: JiraIcon,
+  // jira_create_ticket: JiraIcon,
+  // jira_search: JiraIcon,
+  // jira_add_comment: JiraIcon,
 
   // Trello
   trello_get_boards: TrelloIcon,
@@ -214,11 +214,11 @@ export const ToolBgMap: Record<string, string> = {
   github_search_issues: 'bg-slate-500/15 border-slate-500/30',
   github_get_file: 'bg-slate-500/15 border-slate-500/30',
 
-  // Jira - blue-600
-  jira_get_issue: 'bg-blue-600/15 border-blue-600/30',
-  jira_create_ticket: 'bg-blue-600/15 border-blue-600/30',
-  jira_search: 'bg-blue-600/15 border-blue-600/30',
-  jira_add_comment: 'bg-blue-600/15 border-blue-600/30',
+  // Jira integration disabled
+  // jira_get_issue: 'bg-blue-600/15 border-blue-600/30',
+  // jira_create_ticket: 'bg-blue-600/15 border-blue-600/30',
+  // jira_search: 'bg-blue-600/15 border-blue-600/30',
+  // jira_add_comment: 'bg-blue-600/15 border-blue-600/30',
 
   // Trello - sky-500
   trello_get_boards: 'bg-sky-500/15 border-sky-500/30',
@@ -290,11 +290,11 @@ export const ToolDescriptionMap: Record<string, string> = {
   github_search_issues: 'Searching GitHub issues',
   github_get_file: 'Reading file from GitHub',
 
-  // Jira
-  jira_get_issue: 'Fetching Jira issue',
-  jira_create_ticket: 'Creating Jira ticket',
-  jira_search: 'Searching Jira with JQL',
-  jira_add_comment: 'Adding Jira comment',
+  // Jira integration disabled
+  // jira_get_issue: 'Fetching Jira issue',
+  // jira_create_ticket: 'Creating Jira ticket',
+  // jira_search: 'Searching Jira with JQL',
+  // jira_add_comment: 'Adding Jira comment',
 
   // Trello
   trello_get_boards: 'Reading Trello boards',

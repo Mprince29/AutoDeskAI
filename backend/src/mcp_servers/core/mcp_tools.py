@@ -24,8 +24,8 @@ SENSITIVE_TOOLS = [
     "find_files",
     # Phase Command Center Tools
     "github_create_issue",
-    "jira_create_ticket",
-    "jira_add_comment",    # modifies tracked ticket state - requires user confirmation
+    # "jira_create_ticket",  -- Jira integration disabled
+    # "jira_add_comment",    -- Jira integration disabled
     "trello_create_card",
     "trello_move_card",
     # External broadcast - can spam real channels without confirmation

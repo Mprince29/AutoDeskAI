@@ -281,7 +281,7 @@ class VaultService:
     _ENV_CRED_MAP: Dict[str, Dict[str, str]] = {
         "slack":    {"access_token": "SLACK_BOT_TOKEN"},
         "github":   {"access_token": "GITHUB_TOKEN"},
-        "jira":     {"access_token": "JIRA_API_TOKEN", "jira_server": "JIRA_SERVER_URL", "jira_email": "JIRA_USER_EMAIL"},
+        # "jira":   {"access_token": "JIRA_API_TOKEN", "jira_server": "JIRA_SERVER_URL", "jira_email": "JIRA_USER_EMAIL"},  # Jira integration disabled
         "notion":   {"access_token": "NOTION_TOKEN"},
         "trello":   {"api_key": "TRELLO_API_KEY", "token": "TRELLO_TOKEN"},
         "discord":  {"access_token": "DISCORD_BOT_TOKEN"},

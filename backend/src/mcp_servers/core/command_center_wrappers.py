@@ -14,15 +14,8 @@ except ImportError as _e:
     logger.warning(f"[command_center] GitHub tools unavailable - PyGithub not installed: {_e}")
     _GITHUB_AVAILABLE = False
 
-try:
-    from mcp_servers.tools.jira_tools import (
-        JiraIssueRequest, CreateJiraTicketRequest, SearchJiraRequest, CommentJiraRequest,
-        get_jira_issue, create_jira_ticket, search_jira_issues, add_jira_comment,
-    )
-    _JIRA_AVAILABLE = True
-except ImportError as _e:
-    logger.warning(f"[command_center] Jira tools unavailable - jira library not installed: {_e}")
-    _JIRA_AVAILABLE = False
+# Jira integration disabled
+_JIRA_AVAILABLE = False
 
 try:
     from mcp_servers.tools.trello_tools import (

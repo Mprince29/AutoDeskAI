@@ -23,5 +23,5 @@ from . import outlook_tools         # noqa: F401
 from . import slack_tools           # noqa: F401
 from . import discord_tools         # noqa: F401
 from . import github_tools          # noqa: F401
-from . import jira_tools            # noqa: F401
+# from . import jira_tools          # noqa: F401  -- Jira integration disabled
 from . import trello_tools          # noqa: F401

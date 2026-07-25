@@ -1,6 +1,6 @@
 const _QA_FRONT_RE = /^(what[\s'"]|how[\s'"]|why[\s'"]|who[\s'"]|when[\s'"]|where[\s'"]|explain |tell me |describe |define |can you |give me |is there |are there |what's |whats |could you |summarize |compare |difference |pros and cons|advantages|disadvantages|what is |what are |what does |what do |how does |how do |how can |is it |are they |do you |did you |should i |help me understand|list the|list all|show me)/i;
 const _TASK_FRONT_RE = /^(create|make|build|generate|send|schedule|write|compose|draft|upload|analyze|search|find|fetch|set up|setup|delete|remove|update|edit|book|translate|organize|organise|push|pull|commit|merge|comment|invite|post|message|sync|export|import|get|move|add|react)/i;
-const _PLATFORM_TASK_RE = /\b(github|jira|trello|slack|discord|telegram)\b.*(issue|ticket|card|board|channel|repo|repository|message|history|reaction|comment|bot)/i;
+const _PLATFORM_TASK_RE = /\b(github|trello|slack|discord|telegram)\b.*(issue|ticket|card|board|channel|repo|repository|message|history|reaction|comment|bot)/i; // "jira" removed - Jira integration disabled
 const _EMBEDDED_TASK_FRONT_RE = /\b(create|make|build|generate|send|schedule|write|compose|draft|upload|save|download|analyze|search|find|fetch|set up|setup|delete|remove|update|edit|modify|add|insert|book|organise|organize|hire|invite|register|deploy|run|execute|start|stop|cancel|remind|notify|summarize|translate|convert|export|import|merge|push|pull)\b/i;
 
 export function isTaskRequest(text: string): boolean {
@@ -20,8 +20,7 @@ export function detectAgentSuggestion(text: string): AgentSuggestion {
   const t = text.toLowerCase();
   if (/github|repo|repository|branch|commit|pull request|pr|push|merge/.test(t))
     return { name: 'Engineering Lead', description: 'Manages GitHub repositories, issues, and code workflows', role: 'engineering_lead' };
-  if (/jira|ticket|issue|sprint|backlog/.test(t))
-    return { name: 'Project Manager', description: 'Manages Jira tickets, sprints, and project backlogs', role: 'project_manager' };
+  // Project Manager (Jira) suggestion removed - Jira integration disabled
   if (/slack|channel|dm|message|slak/.test(t))
     return { name: 'Communications Sync', description: 'Manages Slack messages, channels, and team notifications', role: 'communications_sync' };
   if (/discord|server|thread|community/.test(t))

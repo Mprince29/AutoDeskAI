@@ -84,24 +84,25 @@ INTEGRATION_REGISTRY: dict = {
         "icon_key": "github",
     },
 
-    "jira": {
-        "name": "Jira",
-        "description": "Create tickets, manage sprints, search with JQL",
-        "auth_type": "oauth2",
-        "oauth_authorize_url": "https://auth.atlassian.com/authorize",
-        "oauth_token_url": "https://auth.atlassian.com/oauth/token",
-        "scopes": ["read:jira-work", "write:jira-work", "read:jira-user", "offline_access"],
-        "extra_params": {
-            "audience": "api.atlassian.com",
-            "prompt": "consent",
-        },
-        "client_id_env": "ATLASSIAN_CLIENT_ID",
-        "client_secret_env": "ATLASSIAN_CLIENT_SECRET",
-        "token_path": "access_token",
-        "test_endpoint": "https://api.atlassian.com/me",
-        "color": "#0052CC",
-        "icon_key": "jira",
-    },
+    # Jira integration disabled
+    # "jira": {
+    #     "name": "Jira",
+    #     "description": "Create tickets, manage sprints, search with JQL",
+    #     "auth_type": "oauth2",
+    #     "oauth_authorize_url": "https://auth.atlassian.com/authorize",
+    #     "oauth_token_url": "https://auth.atlassian.com/oauth/token",
+    #     "scopes": ["read:jira-work", "write:jira-work", "read:jira-user", "offline_access"],
+    #     "extra_params": {
+    #         "audience": "api.atlassian.com",
+    #         "prompt": "consent",
+    #     },
+    #     "client_id_env": "ATLASSIAN_CLIENT_ID",
+    #     "client_secret_env": "ATLASSIAN_CLIENT_SECRET",
+    #     "token_path": "access_token",
+    #     "test_endpoint": "https://api.atlassian.com/me",
+    #     "color": "#0052CC",
+    #     "icon_key": "jira",
+    # },
 
     "notion": {
         "name": "Notion",

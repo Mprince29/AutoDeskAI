@@ -197,7 +197,7 @@ def _is_qa(text: str) -> bool:
     # LinkedIn / integration live-data queries always need the agent
     _INTEGRATION_DATA_RE = re.compile(
         r'\b(linkedin|my profile|my calendar|my contacts|my drive|my slack|'
-        r'my notion|my trello|my github|my jira)\b',
+        r'my notion|my trello|my github)\b',  # "my jira" removed - Jira integration disabled
         re.IGNORECASE
     )
     if _INTEGRATION_DATA_RE.search(t):
@@ -1191,14 +1191,14 @@ async def chat_stream(
         # Detect them first so the heuristic below can't misroute them.
         _PLATFORM_NAMES = {
             "github":   "GitHub Assistant",
-            "jira":     "Jira Manager",
+            # "jira":   "Jira Manager",  -- Jira integration disabled
             "trello":   "Trello Assistant",
             "slack":    "Slack Messenger",
             "discord":  "Discord Messenger",
             "telegram": "Telegram Bot",
         }
         _PLATFORM_RE = re.compile(
-            r'\b(github|jira|trello|slack|discord|telegram)\b',
+            r'\b(github|trello|slack|discord|telegram)\b',  # "jira" removed - Jira integration disabled
             re.IGNORECASE
         )
         platform_match = _PLATFORM_RE.search(full_task)

@@ -378,22 +378,7 @@ async def oauth_callback(
                     metadata["guild_name"] = guild.get("name")
                     logger.info(f"discord: authorized for guild {guild.get('name')} ({guild['id']}) by {email}")
 
-            # ── Jira: must call /accessible-resources to get cloudId ─────────────────
-            if platform == "jira":
-                resources_resp = await client.get(
-                    "https://api.atlassian.com/oauth/token/accessible-resources",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                )
-                if resources_resp.status_code == 200:
-                    resources = resources_resp.json()
-                    if resources:
-                        cloud_id = resources[0]["id"]
-                        metadata["jira_cloud_id"] = cloud_id
-                        metadata["jira_server"] = f"https://api.atlassian.com/ex/jira/{cloud_id}"
-                        metadata["jira_cloud_name"] = resources[0].get("name", "")
-                        logger.info(f"jira: resolved cloud_id={cloud_id} for user {email}")
-                else:
-                    logger.warning(f"jira: accessible-resources returned {resources_resp.status_code}")
+            # Jira integration disabled - accessible-resources cloudId lookup removed
     except Exception as meta_err:
         logger.warning(f"oauth metadata fetch failed for {platform}: {meta_err}")
 

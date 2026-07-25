@@ -86,11 +86,12 @@ try:
 except ImportError:
     logger.warning("[unified_server] GitHub routes disabled - PyGithub not installed")
 
-try:
-    from mcp_servers.tools.jira_tools import router as jira_router
-    app.include_router(jira_router, prefix="/jira", tags=["Jira"])
-except ImportError:
-    logger.warning("[unified_server] Jira routes disabled - jira library not installed")
+# Jira integration disabled
+# try:
+#     from mcp_servers.tools.jira_tools import router as jira_router
+#     app.include_router(jira_router, prefix="/jira", tags=["Jira"])
+# except ImportError:
+#     logger.warning("[unified_server] Jira routes disabled - jira library not installed")
 
 try:
     from mcp_servers.tools.trello_tools import router as trello_router

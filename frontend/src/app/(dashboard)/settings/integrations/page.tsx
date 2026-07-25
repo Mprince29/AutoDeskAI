@@ -17,7 +17,7 @@ import {
 import { ConnectionGateway } from "../_components/ConnectionGateway";
 import { useOnboarding } from "@/hooks/useOnboarding";
 
-const OAUTH_PLATFORMS = ["slack", "github", "jira", "notion", "discord", "calcom"/*, "linkedin"*/];
+const OAUTH_PLATFORMS = ["slack", "github", "notion", "discord", "calcom"/*, "jira", "linkedin"*/];
 
 export default function IntegrationsPage() {
   const { user, loading, preferences, updatePreferences } = useAuth();

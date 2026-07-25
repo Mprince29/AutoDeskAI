@@ -172,7 +172,7 @@ class MCPClient:
         "save_draft":           "Saving your draft",
         "send_slack_message":   "Sending a Slack message",
         "create_github_issue":  "Creating a GitHub issue",
-        "create_jira_ticket":   "Creating a Jira ticket",
+        # "create_jira_ticket": "Creating a Jira ticket",  -- Jira integration disabled
         "send_discord_message": "Sending a Discord message",
         "send_telegram_message":"Sending a Telegram message",
         "create_trello_card":   "Creating a Trello card",
