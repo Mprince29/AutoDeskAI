@@ -255,11 +255,9 @@ def _resolve_model(role: str) -> str:
     return model
 
 
-COMPANY_DOMAIN = "example.com"
-
-
-def is_company_user(email: str) -> bool:
-    return bool(email) and email.lower().endswith(f"@{COMPANY_DOMAIN}")
+# Company-account identity is centralized in utils.company and driven by the
+# COMPANY_DOMAIN env var. Re-exported here for backward-compatible imports.
+from utils.company import is_company_user  # noqa: F401
 
 
 def _get_user_llm_config(user_id: Optional[int], db: Optional[Session]) -> Dict[str, Any]:

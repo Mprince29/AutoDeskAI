@@ -141,7 +141,7 @@ app = FastAPI(
 #   CORS_ORIGINS=http://localhost:3000,https://xxxx.ngrok-free.app
 _cors_env = os.getenv(
     "CORS_ORIGINS",
-    "https://www.autodeskai.ai,https://autodeskai.ai,https://autodeskai.example.com,http://localhost:3000",
+    "http://localhost:3000,http://localhost:80",
 )
 _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
 logger.info(f"CORS allowed origins: {_cors_origins}")

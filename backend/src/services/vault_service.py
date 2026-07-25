@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from utils.company import is_company_user
+
 # In-memory credential cache: key → {"cred": ..., "ts": float}
 # 5-minute TTL keeps tokens fresh while eliminating repeat decryptions within
 # a single agent workflow (which may call resolve_credential 5-10x per run).
@@ -274,7 +276,8 @@ class VaultService:
 
     # ── Company / Personal Key Resolution ────────────────────────────────────
 
-    COMPANY_DOMAIN = "example.com"
+    # Company-account identity is driven by the COMPANY_DOMAIN env var via
+    # utils.company.is_company_user (no domain hardcoded here).
 
     # Maps platform name → env-var names for each credential field.
     # Used when a company-domain user chooses "Use company keys".
@@ -331,7 +334,7 @@ class VaultService:
 
         # Hard security guard: non-company users must NEVER receive company env creds,
         # even if their DB row has use_company_keys=True due to data corruption or migration.
-        is_company = user_email.lower().endswith(f"@{self.COMPANY_DOMAIN}")
+        is_company = is_company_user(user_email)
         if user and not is_company and user.use_company_keys:
             import logging as _log
             _log.getLogger(__name__).warning(

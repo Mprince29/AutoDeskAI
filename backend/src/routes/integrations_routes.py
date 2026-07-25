@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from auth.database import get_db
 from auth.models import User
 from auth.routes import get_current_user
+from utils.company import is_company_user
 from loguru import logger
 
 router = APIRouter()
@@ -78,8 +79,7 @@ async def integrations_status(
     if email:
         user = db.query(User).filter(User.email == email).first()
         if user:
-            COMPANY_DOMAIN = "example.com"
-            is_company = email.endswith(f"@{COMPANY_DOMAIN}")
+            is_company = is_company_user(email)
             use_company = is_company and (
                 user.use_company_keys if user.use_company_keys is not None else False
             )

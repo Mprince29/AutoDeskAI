@@ -1,6 +1,8 @@
 import re
 from typing import List
 
+from utils.company import get_trusted_domains
+
 class TrieNode:
     def __init__(self):
         self.children = {}
@@ -66,9 +68,13 @@ class ExfiltrationValidator:
 # Initialize a global validator instance
 # By default, we might allow certain safe domains or require manual user whitelisting.
 # For AutoDeskAI, we initialize with core internal domains or leave it strict.
-GLOBAL_EXFILTRATION_VALIDATOR = ExfiltrationValidator([
+# Base public domains that are always safe, plus the configured company domain
+# and any extra domains from TRUSTED_EMAIL_DOMAINS (both via utils.company).
+_BASE_TRUSTED_DOMAINS = [
     "gmail.com",
-    "example.com",
+    "google.com",
     "expert.com",
-    "google.com"
-])
+]
+GLOBAL_EXFILTRATION_VALIDATOR = ExfiltrationValidator(
+    _BASE_TRUSTED_DOMAINS + get_trusted_domains()
+)

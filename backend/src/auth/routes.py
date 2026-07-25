@@ -6,6 +6,7 @@ from .database import get_db
 from .models import User, LoginLog
 from datetime import datetime, timedelta, timezone
 from utils.activity_logger import record_activity
+from utils.company import is_company_user
 import os
 from urllib.parse import urlencode
 import httpx
@@ -660,8 +661,7 @@ def get_gmail_email(email: str, id: str, db: Session = Depends(get_db)):
 def get_user_preferences(email: str = Query(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Return user preferences. Uses cached user object to avoid extra DB round-trip."""
     
-    COMPANY_DOMAIN = "example.com"
-    is_company_user = user.email.endswith(f"@{COMPANY_DOMAIN}")
+    is_company = is_company_user(user.email)
     # Default is False (personal keys) when not yet set - new users start isolated
     use_company_keys = user.use_company_keys if user.use_company_keys is not None else False
 
@@ -676,8 +676,8 @@ def get_user_preferences(email: str = Query(...), db: Session = Depends(get_db),
         "preferred_model": user.preferred_model,
         "is_monitoring": user.is_monitoring,
         # Company key management - only relevant for company-managed accounts
-        "is_company_user": is_company_user,
-        "use_company_keys": use_company_keys if is_company_user else None,
+        "is_company_user": is_company,
+        "use_company_keys": use_company_keys if is_company else None,
         "communication_profile": user.communication_profile,
         "last_visited_path": user.last_visited_path
     }
@@ -731,8 +731,7 @@ def update_user_preferences(
         details=data.model_dump(exclude_unset=True)
     )
 
-    COMPANY_DOMAIN = "example.com"
-    is_company_user = user.email.endswith(f"@{COMPANY_DOMAIN}")
+    is_company = is_company_user(user.email)
 
     return {
         "message": "Preferences updated successfully",
@@ -744,7 +743,7 @@ def update_user_preferences(
         "llm_provider": user.llm_provider,
         "preferred_model": user.preferred_model,
         "is_monitoring": user.is_monitoring,
-        "is_company_user": is_company_user,
+        "is_company_user": is_company,
         "use_company_keys": user.use_company_keys,
         "communication_profile": user.communication_profile,
         "last_visited_path": user.last_visited_path
@@ -788,8 +787,7 @@ def set_key_mode(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    COMPANY_DOMAIN = "example.com"
-    if not email.endswith(f"@{COMPANY_DOMAIN}"):
+    if not is_company_user(email):
         raise HTTPException(status_code=403, detail="This setting is only available to company accounts")
 
     user.use_company_keys = body.use_company_keys

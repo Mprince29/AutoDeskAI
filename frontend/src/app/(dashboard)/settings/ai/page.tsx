@@ -26,7 +26,8 @@ export default function AISettingsPage() {
   const [notification, setNotification] = useState<Notification | null>(null);
   const [integrations, setIntegrations] = useState<Record<string, { connected: boolean; available: boolean }> | null>(null);
 
-  const isCompanyUser = user?.email?.endsWith("@example.com") ?? false;
+  const companyDomain = (process.env.NEXT_PUBLIC_COMPANY_DOMAIN ?? "").trim().toLowerCase();
+  const isCompanyUser = !!companyDomain && (user?.email?.toLowerCase().endsWith(`@${companyDomain}`) ?? false);
   const [useCompanyKeys, setUseCompanyKeys] = useState<boolean>(isCompanyUser);
   const [keyModeLoading, setKeyModeLoading] = useState(false);
   const [ownKeysProvider, setOwnKeysProvider] = useState<string>("");
