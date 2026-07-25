@@ -450,34 +450,6 @@ class Contact(Base):
     tags = Column(JSON, nullable=True)  # list of strings
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-class JournalistReport(Base):
-    """Stores generated investigative articles and all pipeline snapshots."""
-    __tablename__ = "journalist_reports"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    
-    topic = Column(String(500), nullable=False)
-    category = Column(String(100), nullable=False)
-    
-    # Core output
-    markdown_content = Column(Text, nullable=False)
-    
-    # Pipeline snapshots (JSON)
-    research_summary = Column(JSON, nullable=True)
-    outline = Column(JSON, nullable=True)
-    data_insights = Column(JSON, nullable=True)
-    audit = Column(JSON, nullable=True)
-    
-    # Extras
-    image_url = Column(Text, nullable=True)
-    social_kit = Column(JSON, nullable=True)
-    versions = Column(JSON, nullable=True)
-    session_id = Column(String(100), nullable=True, index=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
 class ContactCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
     email: EmailStr = Field(..., max_length=250)
@@ -510,39 +482,5 @@ class ContactResponse(BaseModel):
     tags: Optional[List[str]]
     created_at: datetime
 
-class JournalistReportResponse(BaseModel):
-    id: int
-    user_id: int
-    topic: str
-    category: str
-    markdown_content: str
-    research_summary: Optional[Dict[str, Any]]
-    outline: Optional[Dict[str, Any]]
-    data_insights: Optional[List[Any]]
-    audit: Optional[Dict[str, Any]]
-    image_url: Optional[str]
-    social_kit: Optional[Dict[str, Any]]
-    versions: Optional[List[Any]]
-    session_id: Optional[str]
-    created_at: datetime
-    updated_at: Optional[datetime]
-
-    class Config:
-        from_attributes = True
-
-
-class JournalistSessionResponse(BaseModel):
-    """One entry per session returned to the history panel."""
-    session_id: Optional[str]
-    latest_report_id: int
-    topic: str
-    category: str
-    version_count: int
-    created_at: datetime
-    updated_at: Optional[datetime]
-    image_url: Optional[str]
-
-    class Config:
-        from_attributes = True
 # AgentKnowledgeDoc is defined in auth/models.py - import from there to avoid duplicate table error
 from auth.models import AgentKnowledgeDoc  # noqa: F401

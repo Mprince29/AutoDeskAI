@@ -1,4 +1,4 @@
-import { Table2, Newspaper, MessagesSquare } from "lucide-react";
+import { Table2, MessagesSquare } from "lucide-react";
 
 export interface Tool {
   id: string;
@@ -17,14 +17,6 @@ export const TOOLS: Tool[] = [
     description: "Upload a messy spreadsheet and get back a clean, fixed version instantly. Removes duplicates, fixes formatting, and fills in missing values.",
     href: "/playground/csv-cleaner",
     color: "#10B981",
-  },
-  {
-    id: "ai-journalist",
-    icon: Newspaper,
-    label: "AI Journalist",
-    description: "Generate high-fidelity long-form articles with live web research, SEO optimization, AI cover images, editorial audits, and a full social media kit.",
-    href: "/playground/ai-journalist",
-    color: "#6366f1",
   },
   {
     id: "social-media",

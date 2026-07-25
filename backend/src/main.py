@@ -41,7 +41,6 @@ from routes.proactive_routes import router as proactive_router
 from routes.workflow_routes import router as workflow_router
 from routes.integrations_routes import router as integrations_router
 from mcp_servers.tools.telegram_tools import router as telegram_tools_router
-from routes.journalist_routes import router as journalist_router
 from routes.notification_routes import router as notification_router
 from routes.draft_routes import router as draft_router
 from routes.logging_routes import router as logging_router
@@ -530,7 +529,6 @@ app.include_router(proactive_router, prefix="/api/proactive")
 app.include_router(workflow_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api/integrations")
 app.include_router(telegram_tools_router, prefix="/api/integrations")
-app.include_router(journalist_router, prefix="/api")
 app.include_router(notification_router, prefix="/api/notifications")
 app.include_router(draft_router, prefix="/api")
 app.include_router(logging_router, prefix="/api")

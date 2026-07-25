@@ -62,11 +62,10 @@ const CHAPTERS: Chapter[] = [
     color: 'text-indigo-400',
     bg: 'bg-indigo-500/10 border-indigo-500/20',
     description:
-      'The Playground contains standalone tools for specific workflows like cleaning CSV files or generating long-form articles with web research.',
+      'The Playground contains standalone tools for specific workflows like cleaning CSV files.',
     bullets: [
       'Navigate to Tools in the top menu to open the Playground',
       'Use the CSV Cleaner to instantly fix messy spreadsheets',
-      'Use the AI Journalist to generate SEO-optimized articles',
       'Select Tools from the left sidebar to quickly access them',
     ],
   },
