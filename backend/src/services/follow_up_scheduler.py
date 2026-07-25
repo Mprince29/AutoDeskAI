@@ -66,30 +66,8 @@ def init_follow_up_scheduler():
             replace_existing=True,
             misfire_grace_time=30,
         )
-        # Sequence step advancement (2-min)
-        from routes.sequence_routes import sequence_pulse, check_replies_pulse
-        scheduler.add_job(
-            sequence_pulse,
-            trigger="interval",
-            minutes=2,
-            id="sequence_pulse",
-            replace_existing=True,
-            misfire_grace_time=60,
-        )
-        # Outreach follow-up pulse (every 6 hours):
-        # 1. Check Gmail threads for replies → mark replied=True if found
-        # 2. Only then decide whether to advance due sequence steps (send next follow-up)
-        # Running both together means we never send a follow-up to someone who already replied.
-        scheduler.add_job(
-            check_replies_pulse,
-            trigger="interval",
-            hours=6,
-            id="reply_check_pulse",
-            replace_existing=True,
-            misfire_grace_time=300,
-        )
         scheduler.start()
-        logger.info("Follow-up + auto-reply + sequence + reply-check scheduler started")
+        logger.info("Follow-up + auto-reply scheduler started")
         return scheduler
     except Exception as e:
         logger.error(f"Follow-up scheduler failed to start: {e}")

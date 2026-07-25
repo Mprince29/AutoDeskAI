@@ -9,22 +9,22 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     name = Column(String, nullable=False)
-    
+
     # Gmail OAuth tokens (encrypted)
     gmail_access_token = Column(Text, nullable=True)
     gmail_refresh_token = Column(Text, nullable=True)
     gmail_token_expires_at = Column(DateTime, nullable=True)
-    
+
     # Calendar OAuth tokens (encrypted)
     calendar_access_token = Column(Text, nullable=True)
     calendar_refresh_token = Column(Text, nullable=True)
     calendar_token_expires_at = Column(DateTime, nullable=True)
-    
+
     # Microsoft OAuth tokens (encrypted) - DISABLED
     # microsoft_access_token = Column(Text, nullable=True)
     # microsoft_refresh_token = Column(Text, nullable=True)
     # microsoft_token_expires_at = Column(DateTime, nullable=True)
-    
+
     # Morning Briefing settings
     briefing_enabled = Column(Boolean, default=False)
     briefing_time = Column(String, nullable=True, default="06:00")  # UTC HH:MM
@@ -37,11 +37,11 @@ class User(Base):
     # Telegram Integration
     telegram_chat_id = Column(String, nullable=True) # ID of the user's personal chat with their bot
     telegram_secret = Column(String(100), unique=True, nullable=True) # Unique identifier for webhook routing
-    
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     # Sender profile - injected into email signatures
     role = Column(String, nullable=True)  # e.g. "Senior Product Manager", "HR Lead"
 
@@ -112,11 +112,11 @@ class ActivityLog(Base):
     error_message = Column(Text, nullable=True)
     details     = Column(JSON, nullable=True)                       # Additional details about the action
     ip_address  = Column(String(50), nullable=True)
-    
+
     # Merged from AppLog
     level       = Column(String(20), nullable=True, index=True)     # INFO, WARNING, ERROR, CRITICAL
     module      = Column(String(120), nullable=True)                # Code module (e.g. auth.routes)
-    
+
     created_at  = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     __table_args__ = (
@@ -317,139 +317,6 @@ class PendingAutoReply(Base):
     sent_at = Column(DateTime(timezone=True), nullable=True)
 
 
-# ── Sales Intelligence Models ────────────────────────────────────────────────
-
-class SalesContact(Base):
-    """A company/person being tracked by the sales intelligence tool."""
-    __tablename__ = "sales_contacts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_email = Column(String, index=True, nullable=False)
-    contact_name = Column(String(200), nullable=False)
-    contact_email = Column(String(200), nullable=True, index=True)
-    company = Column(String(200), nullable=False)
-    role = Column(String(200), nullable=True)
-    domain = Column(String(200), nullable=True)
-    notes = Column(Text, nullable=True)
-
-    # Computed fields refreshed on each signal run
-    intent_score = Column(Integer, default=0, nullable=False)
-    last_signal_at = Column(DateTime(timezone=True), nullable=True)
-    last_contacted_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Living dossier — JSON blob summarising all known context
-    dossier = Column(JSON, nullable=True)
-
-    # Lead enrichment fields
-    linkedin_url = Column(String(500), nullable=True)
-    company_size = Column(String(50), nullable=True)       # e.g. "11-50", "201-500"
-    company_industry = Column(String(200), nullable=True)
-    company_location = Column(String(200), nullable=True)
-    company_founded = Column(String(10), nullable=True)
-    linkedin_headline = Column(Text, nullable=True)
-    company_description = Column(Text, nullable=True)
-    company_logo = Column(String(500), nullable=True)
-    tech_stack = Column(JSON, nullable=True)
-    company_news = Column(Text, nullable=True)             # latest buying signal summary
-    email_verified = Column(String(20), nullable=True)    # "valid" | "risky" | "invalid" | None
-    enrichment_status = Column(String(20), nullable=True) # "pending" | "enriched" | "failed"
-    enrichment_source = Column(String(100), nullable=True)  # e.g. "pdl+serpapi"
-    enriched_at = Column(DateTime(timezone=True), nullable=True)
-    lead_timezone = Column(String(100), nullable=True)       # e.g. "America/New_York" — inferred from location
-
-    # Escalation tracking
-    escalated = Column(Boolean, default=False, nullable=False)
-    escalated_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Organisational tagging
-    list_tag = Column(String(100), nullable=True, index=True)   # e.g. "Retail I", "Ebic", "Innovation Lab"
-    geo_tag = Column(String(50), nullable=True, index=True)     # e.g. "US", "UK", "India"
-    product_key = Column(String(50), nullable=True, index=True) # e.g. "ebic", "retailio" — set at lead-save time
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
-class SignalEvent(Base):
-    """A single signal event tied to a sales contact."""
-    __tablename__ = "signal_events"
-
-    id = Column(Integer, primary_key=True, index=True)
-    contact_id = Column(Integer, ForeignKey("sales_contacts.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_email = Column(String, index=True, nullable=False)
-
-    # "email_open" | "email_click" | "email_reply" | "news_mention" | "hiring_signal" | "funding_round" | "website_visit"
-    signal_type = Column(String(50), nullable=False, index=True)
-
-    # Arbitrary extra data: URL clicked, article title, job title, etc.
-    signal_metadata = Column("metadata", JSON, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-
-
-class SalesCampaign(Base):
-    """A bulk email campaign."""
-    __tablename__ = "sales_campaigns"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_email = Column(String, index=True, nullable=False)
-    name = Column(String(300), nullable=False)
-    subject_template = Column(Text, nullable=False)
-    html_template = Column(Text, nullable=False)
-    text_template = Column(Text, nullable=True)
-
-    # "draft" | "sending" | "sent" | "paused"
-    status = Column(String(20), default="draft", nullable=False, index=True)
-
-    total_recipients = Column(Integer, default=0)
-    sent_count = Column(Integer, default=0)
-    failed_count = Column(Integer, default=0)
-    open_count = Column(Integer, default=0)
-    click_count = Column(Integer, default=0)
-    reply_count = Column(Integer, default=0)
-
-    # Optional tag to group campaigns by product / outreach type (e.g. "ProductA", "Q1-Push")
-    outreach_tag = Column(String(100), nullable=True, index=True)
-    # Link to ProductKnowledgeBase product_key (e.g. 'ebic', 'autodeskai')
-    product_key = Column(String(50), nullable=True, index=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    sent_at = Column(DateTime(timezone=True), nullable=True)
-
-
-class CampaignRecipient(Base):
-    """One recipient row per campaign × contact — holds per-recipient tracking state."""
-    __tablename__ = "campaign_recipients"
-
-    id = Column(Integer, primary_key=True, index=True)
-    campaign_id = Column(Integer, ForeignKey("sales_campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_email = Column(String, index=True, nullable=False)
-
-    recipient_email = Column(String(300), nullable=False)
-    recipient_name = Column(String(300), nullable=True)
-    variables = Column(JSON, nullable=True)    # personalisation vars: {first_name, company, ...}
-
-    # Unique token embedded in tracking pixel & redirect links for this recipient
-    tracking_token = Column(String(36), unique=True, nullable=False, index=True)
-
-    # "pending" | "sent" | "failed"
-    send_status = Column(String(20), default="pending", nullable=False, index=True)
-
-    # Tracking counters
-    open_count = Column(Integer, default=0)
-    click_count = Column(Integer, default=0)
-    first_opened_at = Column(DateTime(timezone=True), nullable=True)
-    last_opened_at = Column(DateTime(timezone=True), nullable=True)
-    first_clicked_at = Column(DateTime(timezone=True), nullable=True)
-
-    sent_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Gmail thread ID captured at send time — used for reply detection
-    gmail_thread_id = Column(String(100), nullable=True, index=True)
-    replied = Column(Boolean, default=False, nullable=False)
-
-
 class ContentDraft(Base):
     """In-chat draft for docs/spreadsheets/presentations — user reviews and edits before saving."""
     __tablename__ = "content_drafts"
@@ -465,245 +332,6 @@ class ContentDraft(Base):
     saved_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Email Sequences (multi-step drip campaigns)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class EmailSequence(Base):
-    """A named multi-step drip sequence owned by a user."""
-    __tablename__ = "email_sequences"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_email = Column(String, index=True, nullable=False)
-    name = Column(String(300), nullable=False)
-    # "active" | "paused" | "archived"
-    status = Column(String(20), default="active", nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    steps = relationship("SequenceStep", back_populates="sequence", cascade="all, delete-orphan", order_by="SequenceStep.step_number")
-    enrollments = relationship("SequenceEnrollment", back_populates="sequence", cascade="all, delete-orphan")
-
-
-class SequenceStep(Base):
-    """One email step within a sequence."""
-    __tablename__ = "sequence_steps"
-
-    id = Column(Integer, primary_key=True, index=True)
-    sequence_id = Column(Integer, ForeignKey("email_sequences.id", ondelete="CASCADE"), nullable=False, index=True)
-    step_number = Column(Integer, nullable=False)          # 1-based order
-    delay_days = Column(Integer, default=0, nullable=False) # days after previous step (0 = send immediately)
-    subject_template = Column(Text, nullable=False)
-    html_template = Column(Text, nullable=False)
-    text_template = Column(Text, nullable=True)
-    # "reply" | "open" | "click" | "none" — stop advancing if this event occurred
-    stop_on = Column(String(20), default="reply", nullable=False)
-
-    sequence = relationship("EmailSequence", back_populates="steps")
-
-
-class SequenceEnrollment(Base):
-    """Tracks one recipient's progress through a sequence."""
-    __tablename__ = "sequence_enrollments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    sequence_id = Column(Integer, ForeignKey("email_sequences.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_email = Column(String, index=True, nullable=False)   # the sender
-    recipient_email = Column(String(300), nullable=False, index=True)
-    recipient_name = Column(String(300), nullable=True)
-    variables = Column(JSON, nullable=True)                   # personalisation vars
-
-    current_step = Column(Integer, default=1, nullable=False) # which step fires next (1-based)
-    # "active" | "completed" | "stopped" | "unsubscribed"
-    status = Column(String(20), default="active", nullable=False, index=True)
-    next_send_at = Column(DateTime(timezone=True), nullable=True, index=True)  # UTC scheduled time
-
-    # Track whether recipient has replied/opened/clicked (used for stop_on)
-    replied = Column(Boolean, default=False)
-    opened = Column(Boolean, default=False)
-    clicked = Column(Boolean, default=False)
-
-    # Count-based trigger: advance early when open_count >= 3
-    open_count = Column(Integer, default=0, nullable=False)
-    early_triggered = Column(Boolean, default=False, nullable=False)
-
-    # Pause tracking
-    pause_reason = Column(String(100), nullable=True)  # e.g. 'objection_reply', 'escalation'
-
-    enrolled_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_sent_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Gmail thread ID of the last sent step — used for reply detection
-    gmail_thread_id = Column(String(100), nullable=True, index=True)
-
-    sequence = relationship("EmailSequence", back_populates="enrollments")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Suppressed Emails (unsubscribes + hard bounces)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class SuppressedEmail(Base):
-    """Emails that must never be contacted again."""
-    __tablename__ = "suppressed_emails"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_email = Column(String, index=True, nullable=False)    # sender who owns this suppression
-    suppressed_email = Column(String(300), nullable=False, index=True)
-    # "unsubscribe" | "bounce" | "manual"
-    reason = Column(String(30), default="unsubscribe", nullable=False)
-    suppressed_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_suppressed_user_email", "user_email", "suppressed_email", unique=True),
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Objection Handling
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ObjectionLog(Base):
-    """Log of objection replies with suggested rebuttals."""
-    __tablename__ = "objection_logs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    contact_id = Column(Integer, ForeignKey("sales_contacts.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_email = Column(String, index=True, nullable=False)
-    objection_type = Column(String(50), nullable=False)  # budget | wrong_timing | competitor | no_authority | not_interested | other
-    sentiment = Column(String(20), nullable=False)        # objection | neutral | positive
-    reply_text = Column(Text, nullable=False)             # prospect's reply
-    suggested_reply = Column(Text, nullable=True)         # LLM-generated response
-    rebuttal_used = Column(Text, nullable=True)           # which rebuttal strategy was applied
-    was_sent = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Escalation Events
-# ─────────────────────────────────────────────────────────────────────────────
-
-class EscalationEvent(Base):
-    """Tracks high-intent contact escalations to human reps."""
-    __tablename__ = "escalation_events"
-
-    id = Column(Integer, primary_key=True, index=True)
-    contact_id = Column(Integer, ForeignKey("sales_contacts.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_email = Column(String, index=True, nullable=False)
-    intent_score_at_escalation = Column(Integer, nullable=False)
-    context_brief = Column(Text, nullable=True)
-    notified_email = Column(Boolean, default=False, nullable=False)
-    notified_slack = Column(Boolean, default=False, nullable=False)
-    human_took_over = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Re-engagement and Outreach Memory
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ReengagementEntry(Base):
-    """Scheduled re-engagement email entries."""
-    __tablename__ = "reengagement_entries"
-
-    id = Column(Integer, primary_key=True, index=True)
-    contact_id = Column(Integer, ForeignKey("sales_contacts.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_email = Column(String, index=True, nullable=False)
-    scheduled_at = Column(DateTime(timezone=True), nullable=False, index=True)
-    hook_theme = Column(String(100), nullable=True)  # industry_news | new_case_study | product_update | competitor_move
-    status = Column(String(20), default="pending", nullable=False, index=True)  # pending | sent | cancelled
-    draft_subject = Column(Text, nullable=True)
-    draft_body = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class IcpProfile(Base):
-    """Persistent Ideal Customer Profile definition per user."""
-    __tablename__ = "icp_profiles"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_email = Column(String, unique=True, index=True, nullable=False)
-    # Target personas
-    job_titles = Column(JSON, default=list)          # ["CTO", "VP of Technology", ...]
-    seniority_levels = Column(JSON, default=list)    # ["c_suite", "vp", "director"]
-    # Company criteria
-    industries = Column(JSON, default=list)
-    company_sizes = Column(JSON, default=list)       # LinkedIn headcount buckets
-    revenue_min_m = Column(Integer, nullable=True)   # $ millions
-    revenue_max_m = Column(Integer, nullable=True)
-    locations = Column(JSON, default=list)           # ["India", "USA", "UK", "Europe"]
-    keywords = Column(JSON, default=list)            # intent keywords for SerpAPI
-    # Persona description (free text — used in LLM prompts)
-    persona_description = Column(Text, nullable=True)
-    # Product context
-    product_name = Column(String(100), nullable=True)
-    product_description = Column(Text, nullable=True)
-    sender_name = Column(String(100), nullable=True)
-    sender_title = Column(String(100), nullable=True)
-    cal_link = Column(String(300), nullable=True)
-    # Email sequence templates (Email 1 and Email 2 stored verbatim)
-    email1_template = Column(Text, nullable=True)
-    email2_template = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
-class ProductKnowledgeBase(Base):
-    """
-    Per-product outreach knowledge base.
-    System records (user_email IS NULL) are global defaults; user records override them.
-    Identified by product_key slug (e.g. 'ebic', 'autodeskai').
-    """
-    __tablename__ = "product_knowledge_base"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_email = Column(String, nullable=True, index=True)   # NULL = system/global default
-    product_key = Column(String(50), nullable=False, index=True)   # slug: 'ebic', 'autodeskai'
-    display_name = Column(String(200), nullable=False)
-
-    # ICP targeting
-    icp_job_titles = Column(JSON, default=list)
-    icp_seniority_levels = Column(JSON, default=list)
-    icp_industries = Column(JSON, default=list)
-    icp_company_sizes = Column(JSON, default=list)
-    icp_locations = Column(JSON, default=list)
-    icp_keywords = Column(JSON, default=list)
-    icp_segments = Column(JSON, nullable=True)        # structured segment descriptions
-    icp_persona_description = Column(Text, nullable=True)
-
-    # Product value prop
-    product_description = Column(Text, nullable=True)
-    pain_points = Column(JSON, default=list)          # ["Manual monitoring", "Delayed crisis alerts"]
-    social_proof = Column(JSON, default=list)         # ["8 hrs/week saved", "15-min crisis response"]
-    objection_rebuttals = Column(JSON, nullable=True) # {price: "...", timing: "..."}
-
-    # Outreach assets
-    cal_link = Column(String(300), nullable=True)
-    video_link = Column(String(300), nullable=True)
-    deck_link = Column(String(300), nullable=True)
-    email1_template = Column(Text, nullable=True)
-    email2_template = Column(Text, nullable=True)
-
-    # Sender defaults
-    sender_name = Column(String(100), nullable=True)
-    sender_title = Column(String(100), nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
-class OutreachMemory(Base):
-    """Records all outreach angles ever used for a contact — prevents repetition."""
-    __tablename__ = "outreach_memory"
-
-    id = Column(Integer, primary_key=True, index=True)
-    contact_id = Column(Integer, ForeignKey("sales_contacts.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_email = Column(String, index=True, nullable=False)
-    angle = Column(String(200), nullable=False)       # the hook/theme used
-    message_summary = Column(Text, nullable=True)     # brief of what was said
-    channel = Column(String(50), nullable=True)       # email | sequence_step_1 etc.
-    used_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # ─────────────────────────────────────────────────────────────────────────────

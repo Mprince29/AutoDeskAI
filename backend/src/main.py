@@ -46,10 +46,7 @@ from routes.notification_routes import router as notification_router
 from routes.draft_routes import router as draft_router
 from routes.logging_routes import router as logging_router
 from routes.skills_routes import router as skills_router
-from routes.sales_routes import router as sales_router
-from routes.sequence_routes import router as sequence_router
 from routes.social_routes import router as social_router
-from routes.pipeline_routes import router as pipeline_router
 from auth.database import create_db_and_tables
 import models  # noqa: F401 - ensures AgentToolCallLog (and all models) are in Base.metadata
 from utils.activity_logger import record_activity
@@ -120,38 +117,6 @@ async def lifespan(app: FastAPI):
     watch_task = asyncio.create_task(_url_watch_scheduler())
     components.append("URL-Watcher")
 
-    # Start sequence pulse scheduler (every 2 min)
-    from routes.sequence_routes import sequence_pulse
-
-    async def _sequence_pulse_loop():
-        while True:
-            await asyncio.sleep(120)  # 2 minutes
-            try:
-                await sequence_pulse()
-            except Exception as e:
-                logger.error(f"Sequence pulse loop error: {e}")
-
-    seq_pulse_task = asyncio.create_task(_sequence_pulse_loop())
-    components.append("Sequence-Pulse")
-
-    # Start re-engagement pulse (every hour)
-    async def _reengagement_pulse_loop():
-        while True:
-            await asyncio.sleep(3600)  # 1 hour
-            try:
-                from auth.database import SessionLocal as _SL2
-                from services.reengagement_service import reengagement_pulse
-                db_re = _SL2()
-                try:
-                    await reengagement_pulse(db_re)
-                finally:
-                    db_re.close()
-            except Exception as e:
-                logger.error(f"Re-engagement pulse loop error: {e}")
-
-    reengagement_task = asyncio.create_task(_reengagement_pulse_loop())
-    components.append("Reengagement-Pulse")
-
     # Final startup indicator
     env = os.getenv('ENVIRONMENT', 'development').upper()
     logger.info(f"System Online | {env} | Active: [{', '.join(components)}]")
@@ -164,10 +129,6 @@ async def lifespan(app: FastAPI):
         fu_scheduler.shutdown(wait=False)
     if watch_task and not watch_task.done():
         watch_task.cancel()
-    if seq_pulse_task and not seq_pulse_task.done():
-        seq_pulse_task.cancel()
-    if reengagement_task and not reengagement_task.done():
-        reengagement_task.cancel()
     logger.info("AutoDeskAI API shutting down")
 
 app = FastAPI(
@@ -574,10 +535,7 @@ app.include_router(notification_router, prefix="/api/notifications")
 app.include_router(draft_router, prefix="/api")
 app.include_router(logging_router, prefix="/api")
 app.include_router(skills_router, prefix="/api/skills")
-app.include_router(sales_router, prefix="/api/sales")
-app.include_router(sequence_router, prefix="/api/sequences")
 app.include_router(social_router, prefix="/api/social")
-app.include_router(pipeline_router, prefix="/api/pipeline")
 
 # MICROSOFT DISABLED - uncomment block below to re-enable
 # if os.environ.get("AZURE_CLIENT_ID"):

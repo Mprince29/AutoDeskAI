@@ -1,4 +1,4 @@
-import { Table2, Newspaper, Mail, MessagesSquare } from "lucide-react";
+import { Table2, Newspaper, MessagesSquare } from "lucide-react";
 
 export interface Tool {
   id: string;
@@ -25,14 +25,6 @@ export const TOOLS: Tool[] = [
     description: "Generate high-fidelity long-form articles with live web research, SEO optimization, AI cover images, editorial audits, and a full social media kit.",
     href: "/playground/ai-journalist",
     color: "#6366f1",
-  },
-  {
-    id: "outreach",
-    icon: Mail,
-    label: "Outreach Intelligence",
-    description: "Automated lead discovery and multi-channel outreach. Monitor company signals (news, hiring) and generate personalized campaigns with built-in tracking.",
-    href: "/playground/outreach",
-    color: "#f59e0b",
   },
   {
     id: "social-media",
