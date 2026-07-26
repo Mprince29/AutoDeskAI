@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   X, HelpCircle, MessageSquare, Bot, Mic, Mail, Calendar,
   FileText, Zap, ChevronRight, ChevronLeft, Play,
-  Users, Globe, BookOpen, Shield, Wrench,
+  Users, Globe, BookOpen, Shield,
 } from 'lucide-react';
 
 // ── Chapter definitions ─────────────────────────────────────────────────────
@@ -52,20 +52,6 @@ const CHAPTERS: Chapter[] = [
       'The AI researches your industry automatically',
       'Upload documents to give it your company\'s specific knowledge',
       'Select an assistant from the sidebar to chat with it directly',
-    ],
-  },
-  {
-    id: 'tools',
-    icon: Wrench,
-    title: 'Playground Tools',
-    tagline: 'Powerful standalone utilities',
-    color: 'text-indigo-400',
-    bg: 'bg-indigo-500/10 border-indigo-500/20',
-    description:
-      'The Playground will host standalone tools for specific workflows - more are on the way.',
-    bullets: [
-      'Navigate to Tools in the top menu to open the Playground',
-      'New specialized tools will appear here as they ship',
     ],
   },
   {
@@ -455,13 +441,12 @@ export default function HelpGuide({ customTrigger }: { customTrigger?: (props: {
                       <p className="text-[11px] text-foreground/70 leading-snug">
                         {activeIdx === 0 && 'Go to the Dashboard and type your first message - try "summarise my latest emails"'}
                         {activeIdx === 1 && 'Click the plus icon in the "My Assistants" sidebar and describe a role in 2-3 sentences'}
-                        {activeIdx === 2 && 'Select Tools from the left sidebar dropdown or top menu to access the Playground'}
-                        {activeIdx === 3 && 'Click the audio waveform icon in the chat input area and speak your command'}
-                        {activeIdx === 4 && 'Navigate to Workspaces → Smart Inbox, then ask the AI "show my unread emails"'}
-                        {activeIdx === 5 && 'Ask in chat: "what meetings do I have today?" - no setup required'}
-                        {activeIdx === 6 && 'Click the plus icon in the chat input, attach a PDF, then ask a question about it'}
-                        {activeIdx === 7 && 'Click the people icon in the chat header to open the contacts panel instantly'}
-                        {activeIdx === 8 && 'Just use voice or chat normally - approval prompts appear automatically when needed'}
+                        {activeIdx === 2 && 'Click the audio waveform icon in the chat input area and speak your command'}
+                        {activeIdx === 3 && 'Navigate to Workspaces → Smart Inbox, then ask the AI "show my unread emails"'}
+                        {activeIdx === 4 && 'Ask in chat: "what meetings do I have today?" - no setup required'}
+                        {activeIdx === 5 && 'Click the plus icon in the chat input, attach a PDF, then ask a question about it'}
+                        {activeIdx === 6 && 'Click the people icon in the chat header to open the contacts panel instantly'}
+                        {activeIdx === 7 && 'Just use voice or chat normally - approval prompts appear automatically when needed'}
                       </p>
                     </div>
                   </div>

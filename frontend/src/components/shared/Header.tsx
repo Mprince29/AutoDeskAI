@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import Image from 'next/image';
+import { AppLogo } from './AppLogo';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from 'next-themes';
@@ -10,10 +10,9 @@ import {
   Sun, Moon,
   X, HelpCircle,
   Menu, User as UserIcon, ChevronRight,
-  Settings, Users
+  Settings
 } from 'lucide-react';
 import { MdAssistant } from "react-icons/md";
-import { TbTools } from "react-icons/tb";
 import {
   SiGmail,
   SiGooglecalendar,
@@ -101,12 +100,6 @@ const NAV = [
         desc: 'Access your entire Google Drive library',
       },
     ],
-  },
-  {
-    href: '/playground',
-    label: 'Tools',
-    icon: TbTools,
-    submenu: null,
   },
 ] as const;
 
@@ -201,9 +194,9 @@ export default function Header() {
     <>
       <header className="fixed top-0 left-0 right-0 z-50 h-[54px] bg-background border-b border-border/60 flex items-center px-[14px] shrink-0">
         <div className="flex-1 flex items-center">
-          <Link href="/chat" className="flex flex-col items-center shrink-0 no-underline mr-[14px]">
-            <Image src="/logo.png" alt="AutoDeskAI" width={40} height={40} className="h-6 w-auto" />
-            <span className="text-[10px] font-black text-foreground tracking-wider">AutoDeskAI</span>
+          <Link href="/chat" className="flex flex-col items-center shrink-0 no-underline mr-[14px] gap-0.5">
+            <AppLogo width={48} height={48} className="h-8 w-auto" />
+            <span className="text-[13px] font-black text-foreground tracking-wide leading-none">AutoDeskAI</span>
           </Link>
         </div>
 
@@ -302,23 +295,11 @@ export default function Header() {
                   <p className="text-[12px] font-semibold text-foreground m-0 overflow-hidden text-ellipsis whitespace-nowrap">{user?.name || user?.email}</p>
                   <p className="text-[11px] text-muted m-[2px_0_0] overflow-hidden text-ellipsis whitespace-nowrap">{user?.email}</p>
                 </div>
-                {pathname === '/chat' && (
-                  <button
-                    onClick={() => {
-                      setProfileOpen(false);
-                      window.dispatchEvent(new CustomEvent('toggle-contacts'));
-                    }}
-                    className="flex items-center gap-[8px] p-[7px_10px] rounded-[7px] w-full bg-transparent border-none cursor-pointer text-left transition-colors mb-[2px] hover:bg-surface"
-                  >
-                    <Users className="w-[13px] h-[13px] text-muted shrink-0" />
-                    <span className="text-[12px] font-medium text-foreground">View Relationship</span>
-                  </button>
-                )}
-                <button 
-                  onClick={() => { 
-                    setProfileOpen(false); 
+                <button
+                  onClick={() => {
+                    setProfileOpen(false);
                     window.dispatchEvent(new CustomEvent('open-help-guide'));
-                  }} 
+                  }}
                   className="flex items-center gap-[8px] p-[7px_10px] rounded-[7px] w-full bg-transparent border-none cursor-pointer text-left transition-colors mb-[2px] hover:bg-surface"
                 >
                   <HelpCircle className="w-[13px] h-[13px] text-muted shrink-0" />
@@ -437,18 +418,6 @@ export default function Header() {
                   <Settings className={cn("w-4 h-4 transition-colors", pathname?.startsWith('/settings') ? "text-primary" : "text-muted group-hover:text-foreground")} />
                   <span className="text-sm font-medium">Settings</span>
                 </Link>
-                {pathname === '/chat' && (
-                  <button
-                    onClick={() => {
-                      setMobileNavOpen(false);
-                      window.dispatchEvent(new CustomEvent('toggle-contacts'));
-                    }}
-                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-surface transition-all w-full text-left bg-transparent border-none cursor-pointer group"
-                  >
-                    <Users className="w-4 h-4 text-muted group-hover:text-foreground transition-colors" />
-                    <span className="text-sm font-medium text-foreground">View Relationship</span>
-                  </button>
-                )}
               </div>
 
               <div className="flex items-center gap-3 p-3 rounded-xl bg-background border border-border/50 mb-3">

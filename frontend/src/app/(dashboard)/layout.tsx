@@ -42,7 +42,7 @@ export default function DashboardLayout({
 
     if (!hasRestoredRef.current) {
       // Define "generic" entry points that should trigger a restoration
-      const isEntryPoint = pathname === "/playground" || pathname === "/chat";
+      const isEntryPoint = pathname === "/chat";
       
       if (isEntryPoint && preferences?.last_visited_path && preferences.last_visited_path !== pathname) {
         hasRestoredRef.current = true;

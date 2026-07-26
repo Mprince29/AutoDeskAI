@@ -2,6 +2,7 @@
 import React from "react";
 import { Bot, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { AppLogo } from "@/components/shared/AppLogo";
 
 interface WelcomeModalProps {
   isOpen: boolean;
@@ -43,7 +44,7 @@ export function WelcomeModal({ isOpen, onClose, onStart }: WelcomeModalProps) {
               </button>
 
               {/* Icon */}
-             <img src="/logo.png" alt="AutoDeskAI" className="mx-auto mb-6 w-12 h-12" />
+             <AppLogo width={48} height={48} className="mx-auto mb-6 w-12 h-12" />
 
               {/* Title */}
               <h2 className="text-2xl font-semibold text-foreground mb-2">

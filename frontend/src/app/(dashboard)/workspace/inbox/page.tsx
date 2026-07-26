@@ -23,6 +23,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { SiGmail } from "react-icons/si";
+import { AppLogo } from "@/components/shared/AppLogo";
 
 export default function InboxPage() {
   const { user, loading, preferences } = useAuth();
@@ -428,7 +429,7 @@ export default function InboxPage() {
       >
         <AnimatePresence mode="wait" initial={false}>
           <motion.span key="open" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }} transition={{ duration: 0.15 }}>
-            <img src="/logo.png" alt="" className="w-8 h-8" />
+            <AppLogo width={32} height={32} alt="" className="w-8 h-8" />
           </motion.span>
         </AnimatePresence>
       </motion.button>} */}
@@ -459,7 +460,7 @@ export default function InboxPage() {
               <div className="flex items-center justify-between px-6 py-5 border-b border-border/30 bg-background/30">
                 <div className="flex items-center gap-3">
                   <div className="rounded-xl flex items-center justify-center">
-                    <img src="/logo.png" alt="" className="w-7 h-7" />
+                    <AppLogo width={28} height={28} alt="" className="w-7 h-7" />
                   </div>
                   <div>
                     <p className="text-sm font-black text-foreground tracking-tight">AI Assistant</p>

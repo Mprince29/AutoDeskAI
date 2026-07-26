@@ -10,7 +10,6 @@ import { AgentFleetList } from "./_components/AgentFleetList";
 import { CentralCommand } from "./_components/CentralCommand";
 import { EditAgentModal } from "./_components/EditAgentModal";
 import { NoAgentModal } from "./_components/AgentModals";
-import { ContactsMiniPanel } from "./_components/ContactsMiniPanel";
 import { WelcomeModal } from "./_components/WelcomeModal";
 import { ConfirmationModal } from "@/components/shared/ConfirmationModal";
 import { useOnboarding } from "@/hooks/useOnboarding";
@@ -80,8 +79,7 @@ function DashboardContent() {
 
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [agentTab, setAgentTab] = useState<'all' | 'system' | 'custom' | 'tools'>('all');
-  const [contactsOpen, setContactsOpen] = useState(false);
+  const [agentTab, setAgentTab] = useState<'all' | 'system' | 'custom'>('all');
   const [messagesCache, setMessagesCache] = useState<Record<string | number, Message[]>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
@@ -206,15 +204,6 @@ function DashboardContent() {
     document.body.style.overflow = mobileSidebarOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [mobileSidebarOpen]);
-
-  useEffect(() => {
-    const handleToggle = () => setContactsOpen(prev => {
-      if (!prev) setHistoryOpen(false);
-      return !prev;
-    });
-    window.addEventListener('toggle-contacts', handleToggle);
-    return () => window.removeEventListener('toggle-contacts', handleToggle);
-  }, []);
 
   // Tab-return notification: track when user leaves, check on return
   useEffect(() => {
@@ -642,6 +631,8 @@ function DashboardContent() {
       sessionsLoading={sessionsLoading}
       sidebarCollapsed={sidebarCollapsed}
       onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+      userEmail={user.email}
+      onExpandHistory={() => setHistoryOpen(true)}
     />
   );
 
@@ -714,8 +705,6 @@ function DashboardContent() {
             userEmail={user.email}
             userName={user.name}
             messagesEndRef={messagesEndRef}
-            contactsOpen={contactsOpen}
-            onToggleContacts={() => setContactsOpen(o => !o)}
             onNewChat={handleNewChat}
             currentSessionId={currentSessionId}
             selectedAgent={selectedAgent}
@@ -730,40 +719,6 @@ function DashboardContent() {
             onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
           />
         </div>
-
-        {/* ── Contacts slide-in panel - DESKTOP only ── */}
-        {contactsOpen && (
-          <div
-            className="hidden md:flex"
-            style={{
-              width: 260, flexShrink: 0, height: '100%',
-              borderLeft: '0.5px solid var(--border-light)',
-              background: 'var(--background)',
-              flexDirection: 'column', overflow: 'hidden',
-            }}
-          >
-            <div style={{
-              height: 46, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '0 14px', borderBottom: '0.5px solid var(--border-light)', flexShrink: 0,
-            }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)' }}>Contacts</span>
-              <button
-                onClick={() => setContactsOpen(false)}
-                style={{
-                  width: 22, height: 22, borderRadius: 6, border: 'none',
-                  background: 'transparent', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: 'var(--muted)', fontSize: 16, lineHeight: 1,
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                ×
-              </button>
-            </div>
-            <ContactsMiniPanel userEmail={user.email} />
-          </div>
-        )}
 
         {/* ── Document preview modal ── */}
         {previewDoc && (
@@ -940,38 +895,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ── Mobile Contacts Modal ── */}
-      {contactsOpen && (
-        <div className="md:hidden" style={{ position: 'fixed', inset: 0, zIndex: 120 }}>
-          <div
-            onClick={() => setContactsOpen(false)}
-            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
-          />
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0,
-            height: '80vh', background: 'var(--background)',
-            borderRadius: '20px 20px 0 0', border: '0.5px solid var(--border-light)',
-            display: 'flex', flexDirection: 'column', overflow: 'hidden',
-            boxShadow: '0 -16px 60px rgba(0,0,0,0.3)',
-          }}>
-            <div style={{ padding: '12px 16px 0', flexShrink: 0 }}>
-              <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--border-light)', margin: '0 auto 12px' }} />
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 8, borderBottom: '0.5px solid var(--border-light)' }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)' }}>Contacts</span>
-                <button
-                  onClick={() => setContactsOpen(false)}
-                  style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)' }}
-                >
-                  <X style={{ width: 14, height: 14 }} />
-                </button>
-              </div>
-            </div>
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <ContactsMiniPanel userEmail={user.email} />
-            </div>
-          </div>
-        </div>
-      )}
       {/* ── Welcome Modal ── */}
       <WelcomeModal
         isOpen={showWelcome}

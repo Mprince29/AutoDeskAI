@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Edit, Trash2, Loader2, Zap, Bot, ChevronDown, ArrowRight, Search, Filter, Clock, Users, Sidebar, PanelLeft, ChevronLeft } from "lucide-react";
+import { Plus, Edit, Trash2, Loader2, Zap, Bot, ChevronDown, Search, Filter, Clock, Users, UserCheck, Sidebar, PanelLeft, ChevronLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { ContactsMiniPanel } from "./ContactsMiniPanel";
 
 const AGENT_COLORS = [
   '#10B981', // emerald
@@ -17,15 +17,12 @@ const AGENT_COLORS = [
 
 import { Agent } from "@/types/agent.types";
 
-import { TOOLS, type Tool } from "@/constants/tools-list";
-
-type AgentFilter = 'all' | 'system' | 'custom' | 'tools';
+type AgentFilter = 'all' | 'system' | 'custom';
 
 const FILTER_OPTIONS: { value: AgentFilter; label: string }[] = [
   { value: 'all', label: 'All Assistants' },
   { value: 'system', label: 'Built-in Assistants' },
   { value: 'custom', label: 'My Assistants' },
-  { value: 'tools', label: 'Tools' },
 ];
 
 
@@ -136,8 +133,6 @@ export function AgentFleetList({
   onSelectAgent,
   selectedAgentId,
   deletingId,
-  contactsOpen,
-  onToggleContacts,
   isLoading = false,
   onNewChat,
   sessions,
@@ -146,6 +141,8 @@ export function AgentFleetList({
   onDeleteSession,
   sessionsLoading = false,
   onToggleSidebar,
+  userEmail,
+  onExpandHistory,
 }: {
   agents: Agent[];
   agentTab: AgentFilter;
@@ -155,8 +152,6 @@ export function AgentFleetList({
   onSelectAgent: (name: string) => void;
   selectedAgentId?: string | null;
   deletingId: string | null;
-  contactsOpen?: boolean;
-  onToggleContacts?: () => void;
   isLoading?: boolean;
   onNewChat?: () => void;
   sessions?: { id: number; title: string; updated_at: string | null; message_count: number }[];
@@ -166,22 +161,27 @@ export function AgentFleetList({
   sessionsLoading?: boolean;
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
+  userEmail?: string;
+  onExpandHistory?: () => void;
 }) {
-  const router = useRouter();
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
     history: false,
     system: true,
     custom: false,
-    tools: false
+    relationships: false,
   });
 
   const toggleCategory = (cat: string) => {
-    setExpandedCategories(prev => ({
-      ...prev,
-      system: cat === 'system' ? !prev.system : false,
-      custom: cat === 'custom' ? !prev.custom : false,
-      tools: cat === 'tools' ? !prev.tools : false
-    }));
+    setExpandedCategories(prev => {
+      const next = {
+        system: cat === 'system' ? !prev.system : false,
+        custom: cat === 'custom' ? !prev.custom : false,
+        relationships: cat === 'relationships' ? !prev.relationships : false,
+        history: cat === 'history' ? !prev.history : false,
+      };
+      if (cat === 'history' && next.history) onExpandHistory?.();
+      return next;
+    });
   };
 
   const systemAgents = agents.filter(a => a.is_default || a.role === 'Default' || a.role === 'System');
@@ -358,105 +358,106 @@ export function AgentFleetList({
           </AnimatePresence>
         </div>
 
-        {/* Tools Accordion */}
+        {/* Relationships Accordion */}
         <div className="px-3 py-1">
           <button
-            onClick={() => toggleCategory('tools')}
+            onClick={() => toggleCategory('relationships')}
             className="flex items-center justify-between w-full py-2 hover:bg-surface-dark rounded-lg px-2 transition-colors group"
           >
             <div className="flex items-center gap-2">
-              <Zap className="w-3.5 h-3.5 text-muted group-hover:text-primary transition-colors" />
-              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Tools</span>
+              <UserCheck className="w-3.5 h-3.5 text-muted group-hover:text-primary transition-colors" />
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Relationships</span>
             </div>
             <ChevronDown className={cn(
               "w-3 h-3 text-muted/60 transition-transform duration-200",
-              expandedCategories.tools ? "rotate-0" : "-rotate-90"
+              expandedCategories.relationships ? "rotate-0" : "-rotate-90"
             )} />
           </button>
           <AnimatePresence>
-            {expandedCategories.tools && (
+            {expandedCategories.relationships && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-hidden"
               >
-                <div className="flex flex-col gap-2 py-2">
-                  {TOOLS.map(tool => {
-                    const Icon = tool.icon;
-                    return (
-                      <div
-                        key={tool.id}
-                        onClick={() => router.push(tool.href)}
-                        className="flex flex-col gap-1 p-2.5 rounded-lg border border-border/40 bg-surface/30 cursor-pointer hover:border-primary/30 hover:bg-surface/50 transition-all"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Icon className="w-3 h-3" style={{ color: tool.color }} />
-                          <span className="text-[11px] font-semibold">{tool.label}</span>
-                        </div>
-                        <p className="text-[10px] text-muted leading-relaxed">{tool.description}</p>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 4 }}>
-                          <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                            Built-in
-                          </span>
-                          <span style={{ fontSize: 11, fontWeight: 600, color: tool.color, display: 'flex', alignItems: 'center', gap: 3 }}>
-                            Open <ArrowRight style={{ width: 10, height: 10 }} />
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div style={{ maxHeight: 380, display: 'flex', flexDirection: 'column' }}>
+                  <ContactsMiniPanel userEmail={userEmail ?? ""} />
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        {/* Recent History List - Always Open */}
-        <div className="px-3 py-2 flex flex-col gap-1 bg-surface/5">
-          <div className="flex items-center gap-2 px-2 py-1">
-            <Clock className="w-3.5 h-3.5 text-muted" />
-            <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Recent Activity</span>
-          </div>
-          {sessionsLoading ? (
-            <div className="flex flex-col gap-0.5 px-2 py-1">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-2 px-2 py-2 rounded-lg bg-surface/10 animate-pulse">
-                  <div className="h-5 w-full max-w-[200px] bg-muted/20 rounded" />
-                </div>
-              ))}
+        {/* Recent Activity Accordion */}
+        <div className="px-3 py-1 bg-surface/5">
+          <button
+            onClick={() => toggleCategory('history')}
+            className="flex items-center justify-between w-full py-2 hover:bg-surface-dark rounded-lg px-2 transition-colors group"
+          >
+            <div className="flex items-center gap-2">
+              <Clock className="w-3.5 h-3.5 text-muted group-hover:text-primary transition-colors" />
+              <span className="text-[10px] font-bold text-muted uppercase tracking-wider">Recent Activity</span>
             </div>
-          ) : sessions && sessions.length > 0 && (
-            <div className="flex flex-col gap-0.5">
-              {sessions.slice(0, 10).map(session => {
-                const isActive = session.id === currentSessionId;
-                return (
-                  <div
-                    key={session.id}
-                    onClick={() => onLoadSession?.(session.id)}
-                    className={cn(
-                      "group flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all",
-                      isActive
-                        ? "bg-primary/10 border border-primary/20 text-primary"
-                        : "hover:bg-surface border border-transparent text-muted hover:text-foreground"
-                    )}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="truncate text-xs font-medium">
-                        {session.title || "Untitled Chat"}
-                      </span>
+            <ChevronDown className={cn(
+              "w-3 h-3 text-muted/60 transition-transform duration-200",
+              expandedCategories.history ? "rotate-0" : "-rotate-90"
+            )} />
+          </button>
+          <AnimatePresence>
+            {expandedCategories.history && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-col gap-1 py-1">
+                  {sessionsLoading ? (
+                    <div className="flex flex-col gap-0.5 px-2 py-1">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <div key={i} className="flex items-center gap-2 px-2 py-2 rounded-lg bg-surface/10 animate-pulse">
+                          <div className="h-5 w-full max-w-[200px] bg-muted/20 rounded" />
+                        </div>
+                      ))}
                     </div>
-                    <button
-                      onClick={(e) => onDeleteSession?.(session.id, e)}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-red-500/10 text-muted hover:text-red-400 transition-all"
-                    >
-                      <Trash2 className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  ) : sessions && sessions.length > 0 ? (
+                    <div className="flex flex-col gap-0.5">
+                      {sessions.slice(0, 10).map(session => {
+                        const isActive = session.id === currentSessionId;
+                        return (
+                          <div
+                            key={session.id}
+                            onClick={() => onLoadSession?.(session.id)}
+                            className={cn(
+                              "group flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-all",
+                              isActive
+                                ? "bg-primary/10 border border-primary/20 text-primary"
+                                : "hover:bg-surface border border-transparent text-muted hover:text-foreground"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="truncate text-xs font-medium">
+                                {session.title || "Untitled Chat"}
+                              </span>
+                            </div>
+                            <button
+                              onClick={(e) => onDeleteSession?.(session.id, e)}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-red-500/10 text-muted hover:text-red-400 transition-all"
+                            >
+                              <Trash2 className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-muted text-center py-2 italic">No recent activity</span>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

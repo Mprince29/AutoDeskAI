@@ -433,8 +433,6 @@ export function CentralCommand({
   onPreviewDoc,
   userEmail,
   messagesEndRef,
-  contactsOpen,
-  onToggleContacts,
   selectedAgent,
   onClearAgent,
   onOpenMobileSidebar,
@@ -461,8 +459,6 @@ export function CentralCommand({
   userEmail: string;
   userName?: string;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
-  contactsOpen?: boolean;
-  onToggleContacts?: () => void;
   onNewChat?: () => void;
   currentSessionId?: number | null;
   selectedAgent?: { name: string } | null;
@@ -660,7 +656,7 @@ export function CentralCommand({
 
 
           {/* ── CONTENT AREA ── */}
-          <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-6 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-6 custom-scrollbar bg-repeat bg-local bg-[length:230px_230px] bg-[url('/chat-bg-light.svg')] dark:bg-[url('/chat-bg-dark.svg')]">
             {!hasMessages ? (
               <div className="flex h-full flex-col items-center justify-center text-center px-4">
                 
