@@ -125,6 +125,12 @@ export interface AgentChatRequest {
   message: string;
 }
 
+export interface EmailApprovalDraft {
+  to: string;
+  subject: string;
+  body: string;
+}
+
 export interface EmailNotification {
   email_id: string;
   sender_name: string;
@@ -356,8 +362,8 @@ class ApiService {
     let response: Response;
     try {
       response = await fetch(url, {
-        headers,
         ...options,
+        headers,
       });
     } catch (error) {
       const msg = 'We’re having trouble reaching the server. Please check your connection.';
@@ -1085,9 +1091,11 @@ class ApiService {
     const formData = new FormData();
     formData.append('file', file);
 
-    const url = `${API_BASE_URL}/api/documents/upload?email=${encodeURIComponent(email)}`;
+    const url = `${API_BASE_URL}/api/documents/upload`;
+    const uploadToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
     const response = await fetch(url, {
       method: 'POST',
+      headers: uploadToken ? { Authorization: `Bearer ${uploadToken}` } : {},
       body: formData,
     });
 
@@ -1808,6 +1816,14 @@ class ApiService {
     return this.request<{ success: boolean; message: string }>(`/api/integrations/${provider}/api_key?email=${encodeURIComponent(userEmail)}`, {
       method: 'POST',
       body: JSON.stringify({ fields }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  async approveEmailApproval(approvalId: number, draft: EmailApprovalDraft): Promise<{ success: boolean; action_executed?: boolean }> {
+    return this.request(`/api/agents/approvals/${approvalId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(draft),
       headers: { 'Content-Type': 'application/json' },
     });
   }

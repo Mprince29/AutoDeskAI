@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import sys
+from datetime import datetime, timezone
 
 # Ensure the src directory is on the path when Celery forks workers
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -38,6 +39,57 @@ def _push_update(task_id: str, data: dict) -> None:
         logger.debug(f"Redis push failed: {e}")
 
 
+def _update_agent_task(agent_task_id: int, **fields) -> None:
+    """Persist worker lifecycle state without affecting task execution."""
+    if not agent_task_id:
+        return
+    try:
+        from auth.database import SessionLocal
+        from models import AgentTask
+
+        db = SessionLocal()
+        try:
+            task = db.query(AgentTask).filter(AgentTask.id == agent_task_id).first()
+            if task:
+                for key, value in fields.items():
+                    setattr(task, key, value)
+                db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error(f"Failed to update AgentTask {agent_task_id}: {exc}")
+
+
+def _agent_task_cancelled(agent_task_id: int) -> bool:
+    if not agent_task_id:
+        return False
+    try:
+        from auth.database import SessionLocal
+        from models import AgentTask
+
+        db = SessionLocal()
+        try:
+            task = db.query(AgentTask).filter(AgentTask.id == agent_task_id).first()
+            return bool(task and task.status in {"cancelled", "cancel_requested"})
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error(f"Failed to check cancellation for AgentTask {agent_task_id}: {exc}")
+        return False
+
+
+def _mark_agent_task_cancelled(agent_task_id: int, celery_task_id: str) -> dict:
+    """Persist and publish a cooperative cancellation result."""
+    _update_agent_task(
+        agent_task_id,
+        status="cancelled",
+        completed_at=datetime.now(timezone.utc),
+    )
+    message = "Task cancelled at a safe execution checkpoint."
+    _push_update(celery_task_id, {"type": "cancelled", "message": message})
+    return {"success": False, "cancelled": True, "message": message}
+
+
 class _AgentTask(Task):
     """Base class that initialises the async event loop per worker process."""
     _loop = None
@@ -64,6 +116,7 @@ def run_agent_task(
     agent_type: str = "custom",
     agent_id: int = None,
     context: dict = None,
+    agent_task_id: int = None,
 ) -> dict:
     """
     Execute an agent task asynchronously and stream progress to Redis.
@@ -72,12 +125,22 @@ def run_agent_task(
     """
     task_id = self.request.id
     logger.info(f"[Celery] Starting task {task_id} | user={user_email} | agent={agent_type}")
+    if _agent_task_cancelled(agent_task_id):
+        return _mark_agent_task_cancelled(agent_task_id, task_id)
+    _update_agent_task(
+        agent_task_id,
+        status="in_progress",
+        started_at=datetime.now(timezone.utc),
+    )
 
     _push_update(task_id, {"type": "status", "message": "Task queued - starting now..."})
 
     try:
         from auth.database import SessionLocal
         from services.agent_executor import agent_executor
+
+        async def _cancellation_check():
+            return await asyncio.to_thread(_agent_task_cancelled, agent_task_id)
 
         self.update_state(state="PROGRESS", meta={"step": "initialising"})
         _push_update(task_id, {"type": "status", "message": "Initialising agent..."})
@@ -96,7 +159,11 @@ def run_agent_task(
                         task_description=task_description,
                         user_email=user_email,
                         context=context or {},
+                        cancellation_check=_cancellation_check,
+                        agent_task_id=agent_task_id,
                     ):
+                        if _agent_task_cancelled(agent_task_id):
+                            return _mark_agent_task_cancelled(agent_task_id, task_id)
                         if line.strip():
                             try:
                                 evt = json.loads(line.strip())
@@ -116,7 +183,11 @@ def run_agent_task(
                         task_description=task_description,
                         user_email=user_email,
                         context=context or {},
+                        cancellation_check=_cancellation_check,
+                        agent_task_id=agent_task_id,
                     ):
+                        if _agent_task_cancelled(agent_task_id):
+                            return _mark_agent_task_cancelled(agent_task_id, task_id)
                         if line.strip():
                             try:
                                 evt = json.loads(line.strip())
@@ -132,10 +203,24 @@ def run_agent_task(
             db.close()
 
         _push_update(task_id, {"type": "done"})
+        if isinstance(result, dict) and result.get("cancelled"):
+            return result
+        _update_agent_task(
+            agent_task_id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            result=result,
+        )
         logger.info(f"[Celery] Task {task_id} completed | user={user_email}")
         return result
 
     except Exception as exc:
+        _update_agent_task(
+            agent_task_id,
+            status="failed",
+            completed_at=datetime.now(timezone.utc),
+            error_message=str(exc),
+        )
         logger.error(f"[Celery] Task {task_id} FAILED: {exc}")
         _push_update(task_id, {"type": "error", "message": str(exc)})
         raise

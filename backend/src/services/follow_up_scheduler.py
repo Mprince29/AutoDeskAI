@@ -56,6 +56,8 @@ def init_follow_up_scheduler():
             id="follow_up_pulse",
             replace_existing=True,
             misfire_grace_time=60,
+            coalesce=True,
+            max_instances=1,
         )
         # Auto-reply send-on-deadline (1-min)
         scheduler.add_job(
@@ -65,6 +67,8 @@ def init_follow_up_scheduler():
             id="auto_reply_pulse",
             replace_existing=True,
             misfire_grace_time=30,
+            coalesce=True,
+            max_instances=1,
         )
         scheduler.start()
         logger.info("Follow-up + auto-reply scheduler started")

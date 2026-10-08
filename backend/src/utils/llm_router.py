@@ -71,6 +71,8 @@ FALLBACKS: Dict[str, List[str]] = {
     "router":     _get_env_list("LLM_ROUTER_FALLBACKS"),
 }
 
+_OPENAI_LUNA_MODEL = "gpt-6-luna"
+
 # Google ADC cleanup omitted for brevity in this replace call (keep if already there)
 if os.getenv("GEMINI_API_KEY") and "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
     os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS")
@@ -191,14 +193,6 @@ def _sanitize_kwargs(model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
         ])
 
-    # Gemini 2.5 Flash / Pro are hybrid thinking models. By default they spend
-    # hidden "thinking tokens" before responding. With an 8k max_tokens budget
-    # the model can exhaust all tokens on reasoning and return an empty content
-    # field, which shows up as an empty response. Disabling thinking mode makes
-    # the model behave deterministically like 2.0 Flash and eliminates this.
-    if "gemini-2.5" in model.lower():
-        kwargs.setdefault("thinking", {"type": "disabled"})
-
     return kwargs
 
 
@@ -243,10 +237,47 @@ def clean_messages(messages: List[Union[Dict, Any]]) -> List[Dict]:
     return clean_msgs
 
 
+def _luna_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate the router's common kwargs to OpenAI Luna's API shape."""
+    result: Dict[str, Any] = {
+        "model": _OPENAI_LUNA_MODEL,
+        "messages": kwargs["messages"],
+        "reasoning_effort": "none",
+    }
+    for key in ("temperature", "tools", "tool_choice", "response_format"):
+        if key in kwargs:
+            result[key] = kwargs[key]
+    if "max_completion_tokens" in kwargs:
+        result["max_completion_tokens"] = kwargs["max_completion_tokens"]
+    elif "max_tokens" in kwargs:
+        result["max_completion_tokens"] = kwargs["max_tokens"]
+    return result
+
+
+def _is_luna_model(model: str) -> bool:
+    return model == _OPENAI_LUNA_MODEL or model == f"openai/{_OPENAI_LUNA_MODEL}"
+
+
+def _generate_with_luna(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = client.chat.completions.create(**_luna_kwargs(kwargs))
+    return response.model_dump() if hasattr(response, "model_dump") else response
+
+
+async def _agenerate_with_luna(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = await client.chat.completions.create(**_luna_kwargs(kwargs))
+    return response.model_dump() if hasattr(response, "model_dump") else response
+
+
 def _resolve_model(role: str) -> str:
     # If the caller passed a full model string (e.g. "gemini/gemini-2.0-flash"),
     # use it directly — don't look it up in the role→model map.
-    if "/" in role:
+    if "/" in role or role.startswith("gpt-"):
         return role
     model = ROLE_TO_MODEL.get(role)
     if not model:
@@ -414,8 +445,13 @@ def generate(
         "model": model,
         "messages": clean_messages(messages),
         "temperature": temperature,
-        "api_key": api_key,
     }
+    # In company-env mode, do not pin the primary provider's key onto the
+    # whole LiteLLM fallback chain. LiteLLM resolves each fallback from its
+    # provider-specific environment key (e.g. GROQ_API_KEY or OPENAI_API_KEY).
+    # A user-configured/BYO key must remain explicit.
+    if user_cfg or api_base:
+        kwargs["api_key"] = api_key
     if api_base:
         kwargs["api_base"] = api_base
     if max_tokens is not None:
@@ -437,7 +473,18 @@ def generate(
             kwargs["fallbacks"] = fallbacks
 
     kwargs = _sanitize_kwargs(model, kwargs)
-    return completion(**kwargs)
+    if _is_luna_model(model):
+        return _generate_with_luna(kwargs)
+    try:
+        return completion(**kwargs)
+    except Exception:
+        # LiteLLM 1.93 does not understand Luna's newer reasoning parameters.
+        # Keep Luna as a provider-correct final fallback rather than sending
+        # Gemini/Groq parameters through the OpenAI request.
+        if _OPENAI_LUNA_MODEL in kwargs.get("fallbacks", []):
+            logger.warning("LiteLLM fallbacks exhausted; trying native OpenAI Luna fallback")
+            return _generate_with_luna(kwargs)
+        raise
 
 
 async def agenerate(
@@ -486,8 +533,12 @@ async def agenerate(
         "model": model,
         "messages": clean_messages(messages),
         "temperature": temperature,
-        "api_key": api_key,
     }
+    # In company-env mode, let LiteLLM select the correct key for each model
+    # in the fallback chain. Passing the primary key here would reuse it for
+    # every provider and can send a Gemini/Groq key to OpenAI.
+    if user_cfg or api_base:
+        kwargs["api_key"] = api_key
     if api_base:
         kwargs["api_base"] = api_base
     if max_tokens is not None:
@@ -509,7 +560,15 @@ async def agenerate(
             kwargs["fallbacks"] = fallbacks
 
     kwargs = _sanitize_kwargs(model, kwargs)
-    return await acompletion(**kwargs)
+    if _is_luna_model(model):
+        return await _agenerate_with_luna(kwargs)
+    try:
+        return await acompletion(**kwargs)
+    except Exception:
+        if _OPENAI_LUNA_MODEL in kwargs.get("fallbacks", []):
+            logger.warning("LiteLLM fallbacks exhausted; trying native OpenAI Luna fallback")
+            return await _agenerate_with_luna(kwargs)
+        raise
 
 
 def get_text(response: Dict[str, Any]) -> str:

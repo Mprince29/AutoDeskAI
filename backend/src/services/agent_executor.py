@@ -879,6 +879,8 @@ class AgentExecutor:
         security_token: Optional[str] = None,
         history_messages: Optional[List[Dict[str, str]]] = None,
         display_name: Optional[str] = None,
+        cancellation_check=None,
+        agent_task_id: Optional[int] = None,
     ):
         """Streaming version of execute_agent_task that yields JSON strings."""
         db = None
@@ -985,6 +987,8 @@ class AgentExecutor:
                     db_session=db,
                     security_token=security_token,
                     model=_cost_model,
+                    cancellation_check=cancellation_check,
+                    agent_task_id=agent_task_id,
                 ):
                     if chunk.get("type") == "result":
                         final_result_text = chunk.get("text", "")
@@ -1098,6 +1102,8 @@ class AgentExecutor:
         context: Dict[str, Any] = None,
         security_token: Optional[str] = None,
         history_messages: Optional[List[Dict[str, str]]] = None,
+        cancellation_check=None,
+        agent_task_id: Optional[int] = None,
     ):
         """Stream execution for an explicitly selected dynamic (DB-backed) agent.
 
@@ -1193,6 +1199,8 @@ class AgentExecutor:
                     db_session=db,
                     security_token=security_token,
                     model=_cost_model,
+                    cancellation_check=cancellation_check,
+                    agent_task_id=agent_task_id,
                 ):
                     if chunk.get("type") == "result":
                         final_result_text = chunk.get("text", "")

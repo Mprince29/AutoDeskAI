@@ -234,11 +234,14 @@ class VaultService:
             row.encrypted_token = None
             row.encrypted_refresh_token = None
         else:
-            # Create an explicit 'opt-out' row
+            # Create an explicit 'opt-out' row. Derive auth_type from the platform's
+            # actual registry entry rather than guessing, since it's never connected.
+            from services.integration_registry import INTEGRATION_REGISTRY
+            platform_auth_type = INTEGRATION_REGISTRY.get(platform, {}).get("auth_type", "api_key")
             row = UserIntegration(
                 user_id=user_id,
                 platform=platform,
-                auth_type="api_key", # placeholder
+                auth_type=platform_auth_type,
                 status="disconnected"
             )
             db.add(row)
@@ -428,8 +431,8 @@ class VaultService:
                     error_data = resp.json()
                     if isinstance(error_data, dict) and "error" in error_data:
                         error_detail += f": {error_data['error']}"
-                except:
-                    pass
+                except (ValueError, KeyError) as exc:
+                    logger.debug(f"vault.test_connection: could not parse Trello error body: {exc}")
                 error_detail += " - Check that API Key and Token are current and from the same account"
             
             return {"ok": False, "detail": error_detail}

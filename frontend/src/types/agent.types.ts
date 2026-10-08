@@ -21,6 +21,8 @@ export interface Message {
   workflowId?: number;
   workflowGoal?: string;
   workflowSteps?: unknown[];
+  approvalId?: number;
+  approvalPayload?: { to?: string; subject?: string; body?: string };
 }
 
 export interface AgentStatus {
@@ -52,7 +54,7 @@ export interface AgentExecutionResult {
 }
 
 export interface AgentStreamEvent {
-  type: 'text' | 'tool_use' | 'tool_result' | 'error' | 'done' | 'status' | 'tool_call' | 'result' | 'chunk' | 'workflow_created' | 'agent' | 'cache_hit' | 'safety';
+  type: 'text' | 'tool_use' | 'tool_result' | 'error' | 'done' | 'status' | 'tool_call' | 'result' | 'chunk' | 'workflow_created' | 'agent' | 'cache_hit' | 'safety' | 'approval_required';
   content?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -70,6 +72,8 @@ export interface AgentStreamEvent {
   model_used?: string;
   name?: string;
   display?: string;
+  approval_id?: number;
+  payload?: { to?: string; subject?: string; body?: string };
 }
 
 export interface AgentBlueprint {

@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from contextlib import asynccontextmanager
 
 # Import routers after logger is configured
-from auth.routes import router as auth_router
+from auth.routes import router as auth_router, decode_access_token
 from routes.agent_routes import router as agent_router
 from routes.dynamic_agent_routes import router as dynamic_agent_router
 import mcp_servers.tools  # noqa: F401 - triggers @mcp_tool registration for all tool modules
@@ -49,6 +49,7 @@ from auth.database import create_db_and_tables
 import models  # noqa: F401 - ensures AgentToolCallLog (and all models) are in Base.metadata
 from utils.activity_logger import record_activity
 from auth.database import SessionLocal as _SL
+from services.metrics import observe_request, prometheus_text
 
 # Create database tables, then attach the DB log sink (WARNING+ → app_logs table)
 create_db_and_tables()
@@ -145,6 +146,18 @@ _cors_env = os.getenv(
 )
 _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
 logger.info(f"CORS allowed origins: {_cors_origins}")
+
+
+def _cors_error_headers(request: Request) -> dict[str, str]:
+    """Preserve browser-readable CORS headers on middleware short-circuits."""
+    origin = request.headers.get("origin")
+    if origin and origin in _cors_origins:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -278,23 +291,64 @@ async def _is_rate_limited(key: str) -> bool:
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
+    # Browser CORS preflight requests do not carry the actual Authorization
+    # header. Let CORSMiddleware answer OPTIONS before identity enforcement;
+    # otherwise authenticated frontend calls fail as a generic fetch error.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    # Identity supplied in a query/header is never authoritative. If a route
+    # still accepts legacy identity fields, bind them to the verified bearer.
+    supplied_identity = (
+        request.query_params.get("email")
+        or request.headers.get("x-user-email")
+        or request.headers.get("x-auth-email")
+    )
+    verified_identity = None
+    if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/auth/"):
+        auth = request.headers.get("authorization", "")
+        if not auth.lower().startswith("bearer "):
+            # Webhook providers authenticate with their own signatures and do
+            # not use bearer tokens. Legacy identity fields, however, may not
+            # be used without a bearer binding.
+            if supplied_identity:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Bearer authentication required"},
+                    headers=_cors_error_headers(request),
+                )
+        else:
+            try:
+                verified_identity = decode_access_token(auth[7:].strip())
+            except Exception:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid authentication token"},
+                    headers=_cors_error_headers(request),
+                )
+        if supplied_identity and verified_identity and supplied_identity.lower() != verified_identity.lower():
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Identity does not match authenticated user"},
+                headers=_cors_error_headers(request),
+            )
+
     if request.method not in _RATE_LIMIT_METHODS:
         return await call_next(request)
     path = request.url.path
     if any(path.startswith(p) for p in _RATE_LIMITED_PREFIXES):
         # Identify user by email query param or X-User-Email header
-        user_key = (
-            request.query_params.get("email")
-            or request.headers.get("x-user-email")
-            or request.client.host  # fallback to IP
-        )
+        user_key = verified_identity or supplied_identity or request.client.host
         if await _is_rate_limited(user_key):
             return JSONResponse(
                 status_code=429,
                 content={
                     "detail": f"Rate limit exceeded - max {_RATE_LIMIT_MAX} agent requests per minute. Please wait and try again."
                 },
-                headers={"Retry-After": str(_RATE_LIMIT_WINDOW)},
+                headers={
+                    "Retry-After": str(_RATE_LIMIT_WINDOW),
+                    **_cors_error_headers(request),
+                },
             )
     return await call_next(request)
 
@@ -306,6 +360,9 @@ async def latency_logging_middleware(request: Request, call_next):
     start_time = time.perf_counter()
     response = await call_next(request)
     duration = time.perf_counter() - start_time
+    observe_request(request.method, request.url.path, response.status_code, duration * 1000)
+    if response.status_code >= 500:
+        logger.critical(f"API alert: {request.method} {request.url.path} returned {response.status_code}")
     
     # Add duration to response headers for debugging
     response.headers["X-Response-Time"] = f"{duration:.3f}s"
@@ -450,6 +507,12 @@ async def health_check():
     }
 
 
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(prometheus_text(), media_type="text/plain; version=0.0.4")
+
+
 @app.get("/health/db")
 async def health_db():
     """Connection pool status - useful for diagnosing pool exhaustion under load."""
@@ -470,9 +533,13 @@ async def health_db():
 # Real-time inbox update stream
 # Inbox page subscribes to this to get live notifications when new emails arrive.
 @app.get("/api/automated/updates")
-async def automated_updates(email: str = Query(..., description="User email")):
+async def automated_updates(token: str = Query(..., description="JWT access token")):
     """SSE stream that fires an 'updated' event whenever the inbox monitoring detects
     new mail. Clients should reconnect on error (EventSource default behaviour).
+
+    Note: the browser EventSource API cannot send an Authorization header, so the
+    verified JWT is passed as a query param (like the voice websocket) instead of
+    a raw, unverified email.
 
     Protocol:
       - On connect: fires one 'updated' event so the UI refreshes immediately.
@@ -481,6 +548,8 @@ async def automated_updates(email: str = Query(..., description="User email")):
       - After 5 minutes the connection is closed; the browser's EventSource will
         reconnect automatically (unless the client called es.close()).
     """
+    email = decode_access_token(token)
+
     async def _event_stream():
         import json as _json
         from routes.webhooks import _AUTO_REPLY_PENDING

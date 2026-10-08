@@ -33,11 +33,11 @@ services:
       - AZURE_REDIRECT_URI=${AZURE_REDIRECT_URI:-http://localhost:8000/api/auth/microsoft/callback}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - LLM_DRAFTER_MODEL=${LLM_DRAFTER_MODEL:-gemini/gemini-2.5-flash}
-      - LLM_EXTRACTOR_MODEL=${LLM_EXTRACTOR_MODEL:-gemini/gemini-2.5-flash}
-      - LLM_CLASSIFIER_MODEL=${LLM_CLASSIFIER_MODEL:-gemini/gemini-2.5-flash}
-      - LLM_VALIDATOR_MODEL=${LLM_VALIDATOR_MODEL:-groq/llama-3.3-70b-versatile}
-      - LLM_ROUTER_MODEL=${LLM_ROUTER_MODEL:-gemini/gemini-2.5-flash}
+      - LLM_DRAFTER_MODEL=${LLM_DRAFTER_MODEL:-gemini/gemini-3.5-flash-lite}
+      - LLM_EXTRACTOR_MODEL=${LLM_EXTRACTOR_MODEL:-gemini/gemini-3.5-flash-lite}
+      - LLM_CLASSIFIER_MODEL=${LLM_CLASSIFIER_MODEL:-gemini/gemini-3.5-flash-lite}
+      - LLM_VALIDATOR_MODEL=${LLM_VALIDATOR_MODEL:-groq/openai/gpt-oss-20b}
+      - LLM_ROUTER_MODEL=${LLM_ROUTER_MODEL:-gemini/gemini-3.5-flash-lite}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
       - LINKEDIN_CLIENT_ID=${LINKEDIN_CLIENT_ID}
@@ -76,9 +76,10 @@ services:
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
       - MAIL_DAY_CAP=${MAIL_DAY_CAP:-500}
       - MAIL_MIN_CAP=${MAIL_MIN_CAP:-40}
-      - ENCRYPTION_SECRET_KEY=${ENCRYPTION_SECRET_KEY}
-      - AGENT_SECURITY_SECRET=${AGENT_SECURITY_SECRET}
-      - DATABASE_URL=${DATABASE_URL}
+      - ENCRYPTION_SECRET_KEY=${ENCRYPTION_SECRET_KEY:?ENCRYPTION_SECRET_KEY is required in production}
+      - AGENT_SECURITY_SECRET=${AGENT_SECURITY_SECRET:?AGENT_SECURITY_SECRET is required in production}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required in production}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
@@ -90,9 +91,12 @@ services:
       - backend_logs:/app/logs
       - backend_chroma:/app/chroma_db
       - backend_uploads:/app/uploads
+      - backend_agent_knowledge:/app/agent_knowledge
 
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
     restart: unless-stopped
@@ -103,6 +107,35 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: autodeskai-backend:latest
+    command: ["celery", "-A", "workers.celery_app", "worker", "--loglevel=INFO", "--concurrency=2", "-Q", "default,long_running"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required in production}
+      - ENCRYPTION_SECRET_KEY=${ENCRYPTION_SECRET_KEY:?ENCRYPTION_SECRET_KEY is required in production}
+      - AGENT_SECURITY_SECRET=${AGENT_SECURITY_SECRET:?AGENT_SECURITY_SECRET is required in production}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=2
+      - REDIS_URL=redis://redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A workers.celery_app inspect ping -d celery@$$HOSTNAME | grep -q pong"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
 
     deploy:
       resources:
@@ -132,6 +165,27 @@ services:
         limits:
           cpus: '0.5'
           memory: 512M
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: autodeskai-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-autodeskai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-autodeskai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
 
   frontend:
     build:
@@ -195,7 +249,11 @@ volumes:
     driver: local
   backend_uploads:
     driver: local
+  backend_agent_knowledge:
+    driver: local
   redis_data:
+    driver: local
+  postgres_data:
     driver: local
   nginx_cache:
     driver: local

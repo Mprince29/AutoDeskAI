@@ -2,7 +2,7 @@ export interface WorkflowStep {
   id: number;
   name: string;
   description: string;
-  status: 'pending' | 'approved' | 'rejected' | 'modified' | 'completed' | 'failed' | 'executing' | 'cancelled';
+  status: 'pending' | 'approved' | 'rejected' | 'modified' | 'completed' | 'failed' | 'executing' | 'cancelled' | 'expired';
   step_number?: number;
   tool_name?: string;
   tool_input?: Record<string, unknown>;

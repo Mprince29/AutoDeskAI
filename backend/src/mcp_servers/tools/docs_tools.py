@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from auth.database import get_db
+from auth.routes import get_current_user
+from auth.models import User
 from services.google_workspace_service import GoogleWorkspaceService
 from services.redis_service import cache_google_api
 from loguru import logger
@@ -21,11 +23,12 @@ async def _cached_search_docs(email: str, query: str, db: Session):
 
 @router.get("/list")
 async def list_google_docs(
-    email: str = Query(..., description="User email"),
     max_results: int = Query(50, description="Max results to return"),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Fetch the list of Google Docs for the connected user."""
+    email = user.email
     try:
         return await _cached_list_docs(email, max_results, db)
     except Exception as e:
@@ -34,11 +37,12 @@ async def list_google_docs(
 
 @router.get("/search")
 async def search_google_docs(
-    email: str = Query(..., description="User email"),
     query: str = Query(..., description="Search query"),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Search for Google Docs by name."""
+    email = user.email
     try:
         return await _cached_search_docs(email, query, db)
     except Exception as e:

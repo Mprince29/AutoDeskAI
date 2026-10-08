@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Query
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from .database import get_db
@@ -14,8 +15,38 @@ from typing import Optional, Tuple
 import bcrypt
 import time
 import threading
+from jose import jwt, JWTError
+from services.security import create_oauth_state, verify_oauth_state
 
 router = APIRouter()
+
+# ── JWT ──────────────────────────────────────────────────────────────────────
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
+JWT_EXPIRE_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES", "1440"))
+
+if not JWT_SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY is not set. Add it to your .env file.")
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def create_access_token(email: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    payload = {"sub": email, "exp": expire}
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> str:
+    """Returns the user email encoded in the token, or raises HTTPException(401)."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    email = payload.get("sub")
+    if not email:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    return email
 
 # ── User cache ────────────────────────────────────────────────────────────────
 # Avoids a DB round-trip on every request for get_current_user.
@@ -45,8 +76,15 @@ def _cache_invalidate(email: str):
         _USER_CACHE.pop(email, None)
 
 
-def get_current_user(email: str = Query(...), db: Session = Depends(get_db)) -> User:
-    """Get current user from email query parameter, with a 60s in-process cache."""
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """Get current user from a verified JWT bearer token, with a 60s in-process cache."""
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    email = decode_access_token(credentials.credentials)
     now = time.monotonic()
     with _USER_CACHE_LOCK:
         entry = _USER_CACHE.get(email)
@@ -121,7 +159,7 @@ def gmail_oauth_login(email: str = Query(...)):
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
-        "state": email  # Pass user email as state
+        "state": create_oauth_state(email, "google")
     }
     url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
     return RedirectResponse(url)
@@ -130,7 +168,8 @@ def gmail_oauth_login(email: str = Query(...)):
 @router.get("/auth/callback")
 def gmail_oauth_callback(request: Request, db: Session = Depends(get_db)):
     code = request.query_params.get("code")
-    email = request.query_params.get("state")  # User email passed as state if linking
+    state = request.query_params.get("state", "")
+    email = verify_oauth_state(state, "google") if state else None
     google_error = request.query_params.get("error")
     print(f"[DEBUG] OAuth callback received. Code: {bool(code)}, State/Email: {email}, Error: {google_error}")
 
@@ -259,20 +298,16 @@ def gmail_oauth_callback(request: Request, db: Session = Depends(get_db)):
     import json
     from urllib.parse import quote
     user_json = json.dumps({"email": user.email, "name": user.name})
-    # In a real app, use create_access_token() here
-    sso_token = "google-sso-token-" + user.email 
-    
+    sso_token = create_access_token(user.email)
+
     redirect_target = f"{frontend_url}/auth/callback?token={sso_token}&user={quote(user_json)}"
     return RedirectResponse(url=redirect_target)
 
 @router.post("/auth/disconnect-gmail")
-def disconnect_gmail(email: str = Query(...), db: Session = Depends(get_db)):
+def disconnect_gmail(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Disconnect Gmail by clearing user's Gmail tokens"""
+    email = user.email
     try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
         # Clear Gmail tokens
         user.gmail_access_token = None
         user.gmail_refresh_token = None
@@ -292,13 +327,10 @@ def disconnect_gmail(email: str = Query(...), db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to disconnect Gmail: {str(e)}")
 
 @router.post("/auth/disconnect-calendar")
-def disconnect_calendar(email: str = Query(...), db: Session = Depends(get_db)):
+def disconnect_calendar(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Disconnect Calendar by clearing user's Calendar tokens"""
+    email = user.email
     try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
         # Clear Calendar tokens
         user.calendar_access_token = None
         user.calendar_refresh_token = None
@@ -318,13 +350,10 @@ def disconnect_calendar(email: str = Query(...), db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to disconnect Calendar: {str(e)}")
 
 @router.post("/auth/clear-all-google-tokens")
-def clear_all_google_tokens(email: str = Query(...), db: Session = Depends(get_db)):
+def clear_all_google_tokens(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Clear all Google OAuth tokens for a user (Gmail, Calendar, and any future Google services)"""
+    email = user.email
     try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
         # Clear all Google OAuth tokens
         user.gmail_access_token = None
         user.gmail_refresh_token = None
@@ -349,7 +378,10 @@ def clear_all_google_tokens(email: str = Query(...), db: Session = Depends(get_d
         raise HTTPException(status_code=500, detail=f"Failed to clear all Google tokens: {str(e)}")
 
 @router.get("/auth/google/validate")
-def validate_google_connection(email: str = Query(...), db: Session = Depends(get_db)):
+def validate_google_connection(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """
     Proactively verify that the stored Google token can actually be used.
     Makes a lightweight call to the Google tokeninfo endpoint.
@@ -358,9 +390,7 @@ def validate_google_connection(email: str = Query(...), db: Session = Depends(ge
     import httpx as _httpx
     from utils.token_encryption import token_encryption as _enc
 
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    email = user.email
 
     if not user.gmail_access_token:
         return {"valid": False, "error": "Google account not connected"}
@@ -463,7 +493,7 @@ def signup(request: Request, data: SignupRequest, db: Session = Depends(get_db))
     record_login_log(db, new_user.email, "success", "password", request, user_id=new_user.id)
     
     return {
-        "access_token": "mock-jwt-token",
+        "access_token": create_access_token(new_user.email),
         "token_type": "bearer",
         "user": {
             "email": new_user.email,
@@ -489,7 +519,7 @@ def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
     
 
     return {
-        "access_token": "mock-jwt-token",
+        "access_token": create_access_token(user.email),
         "token_type": "bearer",
         "user": {
             "email": user.email,
@@ -568,9 +598,8 @@ def google_sso_login():
     return RedirectResponse(url)
 
 @router.get("/gmail/emails")
-def get_gmail_emails(email: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not user.gmail_access_token:
+def get_gmail_emails(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not user.gmail_access_token:
         raise HTTPException(status_code=404, detail="User or Gmail access token not found.")
     access_token = user.gmail_access_token
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -604,9 +633,8 @@ def get_gmail_emails(email: str, db: Session = Depends(get_db)):
     return {"emails": emails}
 
 @router.get("/gmail/email")
-def get_gmail_email(email: str, id: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not user.gmail_access_token:
+def get_gmail_email(id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not user.gmail_access_token:
         raise HTTPException(status_code=404, detail="User or Gmail access token not found.")
     access_token = user.gmail_access_token
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -658,7 +686,7 @@ def get_gmail_email(email: str, id: str, db: Session = Depends(get_db)):
 
 # --- Missing User Preferences API ---
 @router.get("/user/preferences")
-def get_user_preferences(email: str = Query(...), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def get_user_preferences(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Return user preferences. Uses cached user object to avoid extra DB round-trip."""
     
     is_company = is_company_user(user.email)
@@ -695,14 +723,11 @@ class UpdatePreferencesRequest(BaseModel):
 @router.put("/user/preferences")
 def update_user_preferences(
     data: UpdatePreferencesRequest,
-    email: str = Query(...), 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Endpoint to update user preferences in the database."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-        
+    email = user.email
     if data.auto_classify_emails is not None:
         user.auto_classify_emails = data.auto_classify_emails
     if data.auto_schedule_meetings is not None:
@@ -776,16 +801,14 @@ class KeyModeRequest(BaseModel):
 @router.post("/user/key-mode")
 def set_key_mode(
     body: KeyModeRequest,
-    email: str = Query(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """
     Toggle between company-managed API keys and personal API keys.
     Only meaningful for company accounts - ignored otherwise.
     """
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    email = user.email
 
     if not is_company_user(email):
         raise HTTPException(status_code=403, detail="This setting is only available to company accounts")
@@ -813,14 +836,10 @@ class OnboardingRequest(BaseModel):
 @router.put("/user/onboarding")
 def update_onboarding_status(
     body: OnboardingRequest,
-    email: str = Query(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Update the onboarding completion status for a user."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     user.onboarding_completed = body.onboarding_completed
     db.commit()
     db.refresh(user)
@@ -837,12 +856,8 @@ def update_onboarding_status(
 
 
 @router.get("/user/onboarding-status")
-def get_onboarding_status(email: str = Query(...), db: Session = Depends(get_db)):
+def get_onboarding_status(user: User = Depends(get_current_user)):
     """Get the onboarding completion status for a user."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     return {
         "onboarding_completed": user.onboarding_completed
     }

@@ -41,6 +41,8 @@ export interface Message {
   workflowGoal?: string;
   workflowSteps?: unknown[];
   attachments?: { id: string; filename: string }[];
+  approvalId?: number;
+  approvalPayload?: { to?: string; subject?: string; body?: string };
 }
 
 interface CommandInputProps {
@@ -445,6 +447,7 @@ export function CentralCommand({
   sidebarCollapsed,
   onToggleSidebar,
   userName,
+  onApproveEmail,
 }: {
   messages: any[];
   isLoading: boolean;
@@ -471,6 +474,7 @@ export function CentralCommand({
   hasAgents?: boolean;
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
+  onApproveEmail?: (approvalId: number, payload: { to: string; subject: string; body: string }) => Promise<unknown>;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editAreaRef = useRef<HTMLTextAreaElement>(null);
@@ -495,6 +499,8 @@ export function CentralCommand({
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [showDayName, setShowDayName] = useState(true);
+  const [approvalDrafts, setApprovalDrafts] = useState<Record<number, { to: string; subject: string; body: string }>>({});
+  const [approvalBusy, setApprovalBusy] = useState<number | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -764,6 +770,33 @@ export function CentralCommand({
                               userEmail={userEmail}
                             />
                           </div>
+
+                          {message.approvalId && message.approvalPayload && (() => {
+                            const id = message.approvalId as number;
+                            const draft = approvalDrafts[id] || {
+                              to: message.approvalPayload.to || '',
+                              subject: message.approvalPayload.subject || '',
+                              body: message.approvalPayload.body || '',
+                            };
+                            const setDraft = (key: 'to' | 'subject' | 'body', value: string) =>
+                              setApprovalDrafts(prev => ({ ...prev, [id]: { ...draft, [key]: value } }));
+                            return (
+                              <div className="rounded-xl border border-primary/30 bg-surface/60 p-4 space-y-3">
+                                <div className="font-medium">Review email before sending</div>
+                                <input className="w-full rounded border bg-background px-3 py-2" value={draft.to} onChange={e => setDraft('to', e.target.value)} placeholder="To" />
+                                <input className="w-full rounded border bg-background px-3 py-2" value={draft.subject} onChange={e => setDraft('subject', e.target.value)} placeholder="Subject" />
+                                <textarea className="w-full min-h-32 rounded border bg-background px-3 py-2" value={draft.body} onChange={e => setDraft('body', e.target.value)} placeholder="Email body" />
+                                <button
+                                  disabled={approvalBusy === id || !onApproveEmail}
+                                  onClick={async () => {
+                                    setApprovalBusy(id);
+                                    try { await onApproveEmail?.(id, draft); } finally { setApprovalBusy(null); }
+                                  }}
+                                  className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+                                >{approvalBusy === id ? 'Sending…' : 'Send email'}</button>
+                              </div>
+                            );
+                          })()}
 
                           {!message.isStreaming && (
                             <div className="flex items-center gap-1 opacity-0 group-hover/message:opacity-100 transition-opacity">

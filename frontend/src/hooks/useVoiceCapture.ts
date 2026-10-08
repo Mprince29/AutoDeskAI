@@ -232,11 +232,15 @@ export function useVoiceCapture(
   const playTTS = useCallback(async (text: string, awaitCompletion = false) => {
     if (!text) return;
     try {
+      const ttsToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
       const resp = await fetch(
-        `${API_BASE}/api/voice/tts?email=${encodeURIComponent(userEmail)}`,
+        `${API_BASE}/api/voice/tts`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(ttsToken ? { Authorization: `Bearer ${ttsToken}` } : {}),
+          },
           body: JSON.stringify({ text: text.slice(0, 300) }),
         }
       );
@@ -548,11 +552,12 @@ export function useVoiceCapture(
     }
 
     // ── 2. Open WebSocket to backend ─────────────────────────────────────────
+    const wsToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
     const ws = new WebSocket(
-      `${WS_BASE}/api/voice/ws?email=${encodeURIComponent(userEmail)}`
+      `${WS_BASE}/api/voice/ws?token=${encodeURIComponent(wsToken || '')}`
     );
     wsRef.current = ws;
-    console.log(`[Voice] Opening WebSocket: ${WS_BASE}/api/voice/ws?email=...`);
+    console.log(`[Voice] Opening WebSocket: ${WS_BASE}/api/voice/ws?token=...`);
 
     ws.binaryType = 'arraybuffer';
 

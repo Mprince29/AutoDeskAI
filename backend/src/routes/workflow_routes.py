@@ -1,6 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone, timedelta
+import hashlib
+import json
+import secrets
 from auth.routes import get_db, get_current_user
 from models import WorkflowInstance, WorkflowStep
 from services.workflow_automation_service import WorkflowAutomationService
@@ -51,13 +55,37 @@ async def _execute_step_in_background(workflow_id: int, step_id: int, user_email
                 WorkflowStep.id == step_id,
                 WorkflowInstance.id == workflow_id,
                 WorkflowInstance.user_id == user_id,
+                WorkflowStep.status == "approved",
             )
             .first()
         )
         if not step:
             return
 
-        step.status = "executing"
+        if step.approval_expires_at and step.approval_expires_at <= datetime.now(timezone.utc):
+            step.status = "expired"
+            db.commit()
+            return
+
+        payload_hash = hashlib.sha256(json.dumps(step.tool_input or {}, sort_keys=True, default=str).encode()).hexdigest()
+        if step.approval_payload_hash and step.approval_payload_hash != payload_hash:
+            step.status = "failed"
+            step.error_message = "Approval payload changed after approval"
+            db.commit()
+            return
+
+        # Claim exactly once. A second worker must observe zero updated rows.
+        claimed = db.query(WorkflowStep).filter(
+            WorkflowStep.id == step.id,
+            WorkflowStep.status == "approved",
+        ).update({
+            WorkflowStep.status: "executing",
+            WorkflowStep.started_at: datetime.now(timezone.utc),
+            WorkflowStep.execution_nonce: secrets.token_hex(32),
+        }, synchronize_session=False)
+        if claimed != 1:
+            db.rollback()
+            return
         db.commit()
 
         # Copy to avoid mutating the stored JSON column
@@ -143,7 +171,9 @@ async def _execute_step_in_background(workflow_id: int, step_id: int, user_email
         # Inject HMAC so sensitive tools (send_email etc.) pass the security gate
         # Note: do NOT add user_email here - execute_tool receives it as a separate
         # parameter and strips any duplicate from tool_input before dispatching.
-        tool_input["_security_signature"] = GLOBAL_SIGNER.generate_token("agent_chat", {}, user_email)
+        tool_input["_security_signature"] = GLOBAL_SIGNER.generate_token(
+            step.tool_name, GLOBAL_SIGNER.canonical_params(tool_input), user_email
+        )
 
         result = await execute_tool(step.tool_name, tool_input, user_email, db)
         step.status = "completed"
@@ -322,16 +352,35 @@ async def approve_step(
     if not step:
         raise HTTPException(status_code=404, detail="Step not found")
 
+    # Approval is a one-way transition from pending.  Re-approving a completed,
+    # executing, rejected or expired step could replay an external side effect.
+    if step.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Step cannot be approved from status '{step.status}'")
+
     should_execute = False
 
     if update.status == "approved":
         step.status = "approved"
+        step.approved_by = current_user.id
+        step.approved_at = datetime.now(timezone.utc)
+        step.approval_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        step.approval_payload_hash = hashlib.sha256(
+            json.dumps(step.tool_input or {}, sort_keys=True, default=str).encode()
+        ).hexdigest()
         should_execute = True
     elif update.status == "rejected":
         step.status = "rejected"
+        step.approved_by = current_user.id
+        step.approved_at = datetime.now(timezone.utc)
     elif update.status == "modified" and update.modified_input:
         step.status = "approved"
         step.tool_input = update.modified_input
+        step.approved_by = current_user.id
+        step.approved_at = datetime.now(timezone.utc)
+        step.approval_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        step.approval_payload_hash = hashlib.sha256(
+            json.dumps(step.tool_input or {}, sort_keys=True, default=str).encode()
+        ).hexdigest()
         should_execute = True
 
     db.commit()
@@ -353,6 +402,41 @@ async def approve_step(
     )
 
     return {"success": True, "new_status": step.status}
+
+
+@router.get("/{workflow_id}/steps/{step_id}/preview")
+async def preview_step(
+    workflow_id: int,
+    step_id: int,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return a side-effect-free preview of a workflow step before approval."""
+    step = db.query(WorkflowStep).join(WorkflowInstance).filter(
+        WorkflowStep.id == step_id,
+        WorkflowInstance.id == workflow_id,
+        WorkflowInstance.user_id == current_user.id,
+    ).first()
+    if not step:
+        raise HTTPException(status_code=404, detail="Step not found")
+
+    from mcp_servers.core.mcp_tools import _TOOL_REGISTRY
+    tool = _TOOL_REGISTRY.get(step.tool_name or "")
+    redacted_input = {}
+    for key, value in (step.tool_input or {}).items():
+        redacted_input[key] = "[redacted]" if any(secret in key.lower() for secret in ("token", "secret", "password", "key")) else value
+    return {
+        "workflow_id": workflow_id,
+        "step_id": step_id,
+        "status": step.status,
+        "tool": step.tool_name,
+        "description": step.description,
+        "requires_approval": bool(step.requires_approval),
+        "approval_expires_in_minutes": 10,
+        "side_effects": "External changes may occur when approved",
+        "input": redacted_input,
+        "tool_description": tool.get("description") if tool else None,
+    }
 
 
 @router.post("/{workflow_id}/cancel")

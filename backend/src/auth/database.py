@@ -14,10 +14,9 @@ if not SQLALCHEMY_DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set. Add it to your .env file - SQLite is not supported.")
 
 
-connect_args: dict = {
-    "connect_timeout": 10,
-    "options": "-c statement_timeout=30000",
-}
+connect_args: dict = {}
+if SQLALCHEMY_DATABASE_URL.startswith("postgresql"):
+    connect_args = {"connect_timeout": 10, "options": "-c statement_timeout=30000"}
 
 engine_kwargs = {
     "poolclass": QueuePool,
@@ -36,7 +35,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-_SCHEMA_VERSION = 28  # bump this integer whenever you add a new migration block below
+_SCHEMA_VERSION = 31  # bump this integer whenever you add a new migration block below
 
 
 def create_db_and_tables():
@@ -701,6 +700,15 @@ def _run_migrations():
         _safe(conn, "CREATE INDEX IF NOT EXISTS ix_se_thread ON sequence_enrollments (gmail_thread_id)")
         conn.commit()
 
+        # ── 29. Payload-bound, expiring, one-time workflow approvals ────────
+        _safe(conn, "ALTER TABLE workflow_steps ADD COLUMN IF NOT EXISTS approved_by INTEGER")
+        _safe(conn, "ALTER TABLE workflow_steps ADD COLUMN IF NOT EXISTS approval_expires_at TIMESTAMPTZ")
+        _safe(conn, "ALTER TABLE workflow_steps ADD COLUMN IF NOT EXISTS approval_payload_hash VARCHAR(64)")
+        _safe(conn, "ALTER TABLE workflow_steps ADD COLUMN IF NOT EXISTS execution_nonce VARCHAR(64)")
+        _safe(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_step_nonce ON workflow_steps (execution_nonce) WHERE execution_nonce IS NOT NULL")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_workflow_step_workflow_status ON workflow_steps (workflow_id, status)")
+        conn.commit()
+
         # ── 28. Ensure gmail_thread_id & replied exist (re-apply for DBs that ──
         # ──     recorded v27 before these columns were added)               ──
         _safe(conn, "ALTER TABLE campaign_recipients ADD COLUMN IF NOT EXISTS gmail_thread_id VARCHAR(100)")
@@ -708,6 +716,41 @@ def _run_migrations():
         _safe(conn, "ALTER TABLE sequence_enrollments ADD COLUMN IF NOT EXISTS gmail_thread_id VARCHAR(100)")
         _safe(conn, "CREATE INDEX IF NOT EXISTS ix_cr_thread ON campaign_recipients (gmail_thread_id)")
         _safe(conn, "CREATE INDEX IF NOT EXISTS ix_se_thread ON sequence_enrollments (gmail_thread_id)")
+        conn.commit()
+
+        # ── 31. Durable external-action ledger ──────────────────────────────
+        # Records provider-side mutations so retries and uncertain outcomes
+        # can be reconciled without sending the same action twice.
+        _safe(conn, """
+            CREATE TABLE IF NOT EXISTS external_actions (
+                id SERIAL PRIMARY KEY,
+                agent_task_id INTEGER REFERENCES agent_tasks(id),
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                tool_name VARCHAR(100) NOT NULL,
+                provider VARCHAR(50),
+                idempotency_key VARCHAR(500) NOT NULL UNIQUE,
+                request_hash VARCHAR(64) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                request_payload JSON,
+                result_payload JSON,
+                provider_reference VARCHAR(500),
+                error_message TEXT,
+                unknown_reason TEXT,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_id ON external_actions (id)")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_agent_task_id ON external_actions (agent_task_id)")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_user_id ON external_actions (user_id)")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_tool_name ON external_actions (tool_name)")
+        _safe(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ix_external_actions_idempotency_key ON external_actions (idempotency_key)")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_provider_reference ON external_actions (provider_reference)")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_status ON external_actions (status)")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_request_hash ON external_actions (request_hash)")
+        _safe(conn, "CREATE INDEX IF NOT EXISTS ix_external_actions_created_at ON external_actions (created_at)")
         conn.commit()
 
         # Mark schema as fully applied

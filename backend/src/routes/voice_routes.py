@@ -27,7 +27,7 @@ from typing import Optional
 import httpx
 import websockets
 import websockets.exceptions
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 from pydantic import BaseModel
 
@@ -35,6 +35,8 @@ from services.intent_parser import build_ghost_preview, parse_intent
 from services.rate_limiter import sarvam_limiter
 from services.security import GLOBAL_SIGNER
 from auth.database import SessionLocal
+from auth.routes import decode_access_token, get_current_user
+from auth.models import User
 from utils.activity_logger import record_activity
 
 router = APIRouter()
@@ -669,7 +671,7 @@ async def _stream_tts_to_ws(
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
 
 @router.websocket("/ws")
-async def voice_ws(websocket: WebSocket, email: str = Query(...)):
+async def voice_ws(websocket: WebSocket, token: str = Query(...)):
     """
     Main voice WebSocket.  Browser connects, streams PCM, receives JSON events.
 
@@ -693,6 +695,12 @@ async def voice_ws(websocket: WebSocket, email: str = Query(...)):
       { "type": "force_end" }   - hard timeout from browser
     """
     await websocket.accept()
+
+    try:
+        email = decode_access_token(token)
+    except Exception:
+        await websocket.close(code=1008)
+        return
 
     sarvam_key = os.getenv("SARVAM_API_KEY", "").strip()
     if not sarvam_key:
@@ -973,12 +981,13 @@ async def voice_health():
 # ── Pending result polling ────────────────────────────────────────────────────
 
 @router.get("/pending-result")
-async def get_pending_result(email: str = Query(...)):
+async def get_pending_result(user: User = Depends(get_current_user)):
     """
     HTTP fallback: return any result saved when the WebSocket closed during
     execution. Consumed once - subsequent calls return null until a new result
     is saved.  Frontend polls this when WS closes mid-execution.
     """
+    email = user.email
     entry = _pending_voice_results.get(email)
     if entry and time.time() < entry["expires_at"]:
         del _pending_voice_results[email]
@@ -993,11 +1002,12 @@ class TTSRequest(BaseModel):
 
 
 @router.post("/tts")
-async def text_to_speech(request: TTSRequest, email: str = Query(...)):
+async def text_to_speech(request: TTSRequest, user: User = Depends(get_current_user)):
     """
     Convert text to speech using Sarvam Bulbul v3.
     Returns { "audio_b64": "<base64 WAV>" }.
     """
+    email = user.email
     sarvam_key = os.getenv("SARVAM_API_KEY", "").strip()
     if not sarvam_key:
         raise HTTPException(status_code=400, detail="SARVAM_API_KEY not configured")

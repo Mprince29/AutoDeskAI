@@ -37,8 +37,8 @@ export class ApiClient {
     };
 
     const response = await fetch(url, {
-      headers,
       ...options,
+      headers,
     });
 
     if (!response.ok) {

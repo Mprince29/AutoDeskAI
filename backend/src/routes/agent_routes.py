@@ -15,10 +15,83 @@ from services.security import GLOBAL_SIGNER
 from auth.routes import get_current_user
 from auth.database import get_db
 from auth.models import User, ContentDraft
+from models import AgentTask, ExternalAction
+from mcp_servers.core.mcp_tools import execute_tool
 from utils.activity_logger import record_activity
 from loguru import logger
 
 router = APIRouter()
+
+
+class EmailApprovalPayload(BaseModel):
+    to: str
+    subject: str
+    body: str
+
+
+@router.post("/approvals/{approval_id}/approve")
+async def approve_email_action(
+    approval_id: int,
+    payload: EmailApprovalPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Approve exactly one pending email draft, optionally after editing it."""
+    action = db.query(ExternalAction).filter(
+        ExternalAction.id == approval_id,
+        ExternalAction.user_id == current_user.id,
+        ExternalAction.tool_name == "send_email",
+    ).first()
+    if action is None:
+        raise HTTPException(status_code=404, detail="Email approval not found")
+    if action.status != "awaiting_approval":
+        if action.status == "succeeded":
+            return {"success": True, "already_sent": True, **(action.result_payload or {})}
+        raise HTTPException(status_code=409, detail=f"Email approval is {action.status}")
+
+    edited = payload.model_dump()
+    import hashlib
+    import json as _json
+    edited_hash = hashlib.sha256(
+        _json.dumps(edited, sort_keys=True, default=str).encode()
+    ).hexdigest()
+    # The UI is allowed to edit the draft, but the server replaces the stored
+    # payload and signs this exact version immediately before sending.
+    action.request_payload = edited
+    action.request_hash = edited_hash
+    db.commit()
+
+    signature = GLOBAL_SIGNER.generate_token(
+        "send_email", GLOBAL_SIGNER.canonical_params(edited), current_user.email
+    )
+    result = await execute_tool(
+        "send_email",
+        {**edited, "_security_signature": signature},
+        current_user.email,
+        db,
+    )
+    if result.get("error") or result.get("blocked"):
+        raise HTTPException(status_code=409, detail=result.get("error") or result.get("user_message"))
+    return {"success": True, "action_executed": True, **result}
+
+
+@router.post("/approvals/{approval_id}/cancel")
+def cancel_email_action(
+    approval_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    action = db.query(ExternalAction).filter(
+        ExternalAction.id == approval_id,
+        ExternalAction.user_id == current_user.id,
+        ExternalAction.tool_name == "send_email",
+    ).first()
+    if action is None:
+        raise HTTPException(status_code=404, detail="Email approval not found")
+    if action.status == "awaiting_approval":
+        action.status = "cancelled"
+        db.commit()
+    return {"success": True, "cancelled": True}
 
 _CALENDAR_QUERY_RE = re.compile(
     r'\b(schedule|meeting|event|calendar|when|today|tomorrow|this week|next week|'
@@ -949,7 +1022,8 @@ async def chat_stream(
     # Guardrail: reject nonsensical / gibberish input before hitting the agent pipeline
     if _is_gibberish(task):
         async def _reject_gibberish():
-            yield f"data: {json.dumps({'type': 'result', 'text': 'Please provide a clear task or question. I need meaningful input to help you - for example: \"Summarize my unread emails\" or \"Schedule a meeting with John tomorrow at 3pm\".', 'tools_used': []})}\n\n"
+            message = "Please provide a clear task or question. I need meaningful input to help you - for example: \"Summarize my unread emails\" or \"Schedule a meeting with John tomorrow at 3pm\"."
+            yield f"data: {json.dumps({'type': 'result', 'text': message, 'tools_used': []})}\n\n"
         return StreamingResponse(_reject_gibberish(), media_type="text/event-stream")
 
     # Parse attached document(s) - support both single doc_id (legacy) and doc_ids (multi)
@@ -1234,6 +1308,21 @@ async def chat_stream(
         _CONFIRM_WORDS = ("send", "yes", "look", "good", "confirm", "ok", "sure", "proceed", "do it", "approve", "correct", "send it", "go ahead")
         is_confirm = any(w in full_task.lower() for w in _CONFIRM_WORDS)
         is_email_task = agent_type_str == "email_manager"
+        confirmed_email_send = is_email_task and has_pending_draft and is_confirm
+
+        # A confirmation reply is an approval transition, not a new request
+        # for the LLM to interpret conversationally. Small/fast models may
+        # otherwise answer "I can send that" and ask for a second confirmation
+        # even though the route has already granted the signed action token.
+        execution_task = full_task
+        if confirmed_email_send:
+            execution_task = (
+                "SYSTEM CONFIRMATION STATE: The user has explicitly approved the most recent email draft. "
+                "You MUST call send_email exactly once now, using the exact recipient, subject, and body "
+                "from the most recent draft in the conversation history. Do not ask for another confirmation, "
+                "do not say that the user should say send, and after the tool succeeds report that it was sent.\n\n"
+                f"User confirmation: {task}"
+            )
 
         # Platform tasks always get a security token (they have their own approval gate per tool).
         # Email tasks only get a token after the draft has been shown and user confirmed.
@@ -1252,7 +1341,7 @@ async def chat_stream(
             merged_context = {**(body.context or {}), "cost_opt_mode": body.cost_opt_mode}
             async for line in agent_executor.execute_agent_stream_task(
                 agent_type=agent_type,
-                task_description=full_task,
+                task_description=execution_task,
                 user_email=email,
                 context=merged_context,
                 security_token=chat_security_token,
@@ -1296,11 +1385,34 @@ class AsyncTaskRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 
+def _resolve_persisted_task_status(
+    persisted,
+    payload: Dict[str, Any],
+    source: str = "combined",
+) -> Dict[str, Any]:
+    """Overlay durable AgentTask fields onto a Celery status payload."""
+    if persisted is None:
+        return payload
+    payload = dict(payload)
+    payload["source"] = source
+    payload["status"] = persisted.status
+    payload["agent_task_id"] = persisted.id
+    payload["created_at"] = persisted.created_at.isoformat() if persisted.created_at else None
+    payload["started_at"] = persisted.started_at.isoformat() if persisted.started_at else None
+    payload["completed_at"] = persisted.completed_at.isoformat() if persisted.completed_at else None
+    if persisted.result is not None:
+        payload["result"] = persisted.result
+    if persisted.error_message:
+        payload["error"] = persisted.error_message
+    return payload
+
+
 @router.post("/execute-async")
 async def execute_agent_async(
     request: AsyncTaskRequest,
     email: str = Query(..., description="User email"),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Queue a long-running agent task in Celery and return immediately.
@@ -1310,16 +1422,15 @@ async def execute_agent_async(
     if current_user.email != email:
         raise HTTPException(status_code=403, detail="Not authorized")
     try:
-        from workers.agent_tasks import run_agent_task
-        task = run_agent_task.apply_async(
-            kwargs={
-                "user_email": email,
-                "task_description": request.task_description,
-                "agent_type": request.agent_type or "custom",
-                "agent_id": request.agent_id,
-                "context": request.context or {},
-            },
-            queue="long_running",
+        from services.agent_task_service import enqueue_agent_task
+        task = enqueue_agent_task(
+            user_email=email,
+            task_description=request.task_description,
+            agent_type=request.agent_type or "custom",
+            agent_id=request.agent_id,
+            context=request.context or {},
+            db_session=db,
+            user_id=current_user.id,
         )
         return {"task_id": task.id, "status": "queued", "message": "Task is queued and will be processed shortly."}
     except Exception as e:
@@ -1332,23 +1443,170 @@ async def get_async_task_status(
     task_id: str,
     email: str = Query(..., description="User email"),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    """Poll Celery task status and return current result if complete."""
+    """Return durable AgentTask state, with Celery progress as a live overlay."""
     if current_user.email != email:
         raise HTTPException(status_code=403, detail="Not authorized")
+    persisted = None
+    db_error = None
+    try:
+        # Query durable state first so status remains available without Redis.
+        persisted = db.query(AgentTask).filter(
+            AgentTask.user_id == current_user.id,
+            AgentTask.task_metadata["celery_task_id"].as_string() == task_id,
+        ).first()
+    except Exception as exc:
+        db_error = exc
+
     try:
         from celery.result import AsyncResult
         from workers.celery_app import celery_app as _celery
         result = AsyncResult(task_id, app=_celery)
-        payload: Dict[str, Any] = {"task_id": task_id, "status": result.status}
+        payload: Dict[str, Any] = {
+            "task_id": task_id,
+            "status": result.status,
+            "source": "celery",
+        }
+        payload = _resolve_persisted_task_status(persisted, payload)
+
         if result.ready():
-            payload["result"] = result.result if result.successful() else None
-            payload["error"] = str(result.result) if result.failed() else None
+            if "result" not in payload:
+                payload["result"] = result.result if result.successful() else None
+            if "error" not in payload:
+                payload["error"] = str(result.result) if result.failed() else None
         elif result.state == "PROGRESS":
             payload["meta"] = result.info
         return payload
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as celery_error:
+        if persisted is not None:
+            payload = _resolve_persisted_task_status(
+                persisted,
+                {"task_id": task_id, "source": "database", "celery_unavailable": True},
+                source="database",
+            )
+            return payload
+        if db_error is not None:
+            raise HTTPException(status_code=500, detail=str(db_error))
+        raise HTTPException(status_code=500, detail=str(celery_error))
+
+
+def _external_action_payload(action: ExternalAction) -> Dict[str, Any]:
+    """Return safe reconciliation metadata without exposing request payloads."""
+    return {
+        "id": action.id,
+        "tool_name": action.tool_name,
+        "provider": action.provider,
+        "status": action.status,
+        "provider_reference": action.provider_reference,
+        "error_message": action.error_message,
+        "unknown_reason": action.unknown_reason,
+        "attempt_count": action.attempt_count,
+        "started_at": action.started_at.isoformat() if action.started_at else None,
+        "completed_at": action.completed_at.isoformat() if action.completed_at else None,
+        "created_at": action.created_at.isoformat() if action.created_at else None,
+    }
+
+
+@router.get("/task/{task_id}/actions")
+async def get_async_task_actions(
+    task_id: str,
+    email: str = Query(..., description="User email"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List durable external side effects for one owned AgentTask."""
+    if current_user.email != email:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    task = db.query(AgentTask).filter(
+        AgentTask.user_id == current_user.id,
+        AgentTask.task_metadata["celery_task_id"].as_string() == task_id,
+    ).first()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    actions = db.query(ExternalAction).filter(
+        ExternalAction.agent_task_id == task.id,
+        ExternalAction.user_id == current_user.id,
+    ).order_by(ExternalAction.created_at.asc()).all()
+    return {
+        "task_id": task_id,
+        "agent_task_id": task.id,
+        "actions": [_external_action_payload(action) for action in actions],
+    }
+
+
+@router.post("/task/{task_id}/actions/{action_id}/reconcile")
+async def reconcile_async_task_action(
+    task_id: str,
+    action_id: int,
+    email: str = Query(..., description="User email"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Inspect Gmail for evidence of an unknown send; never retry it."""
+    if current_user.email != email:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    task = db.query(AgentTask).filter(
+        AgentTask.user_id == current_user.id,
+        AgentTask.task_metadata["celery_task_id"].as_string() == task_id,
+    ).first()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    action = db.query(ExternalAction).filter(
+        ExternalAction.id == action_id,
+        ExternalAction.agent_task_id == task.id,
+        ExternalAction.user_id == current_user.id,
+    ).first()
+    if action is None:
+        raise HTTPException(status_code=404, detail="External action not found")
+
+    from services.external_action_service import reconcile_external_action
+    action, reconciled = await reconcile_external_action(
+        action_id=action.id,
+        user_id=current_user.id,
+        db_session=db,
+    )
+    return {
+        "task_id": task_id,
+        "reconciled": reconciled,
+        "action": _external_action_payload(action),
+    }
+
+
+@router.post("/task/{task_id}/cancel")
+async def cancel_async_task(
+    task_id: str,
+    email: str = Query(..., description="User email"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Safely cancel a queued task or request cancellation of an active task."""
+    if current_user.email != email:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    try:
+        from services.agent_task_service import request_agent_task_cancellation
+        task = request_agent_task_cancellation(
+            task_id=task_id,
+            user_id=current_user.id,
+            db_session=db,
+        )
+        return {
+            "task_id": task_id,
+            "agent_task_id": task.id,
+            "status": task.status,
+            "message": (
+                "Task cancelled before execution."
+                if task.status == "cancelled"
+                else "Cancellation requested; the active task will stop at its next safe checkpoint."
+            ),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"cancel task failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/task/{task_id}/stream")

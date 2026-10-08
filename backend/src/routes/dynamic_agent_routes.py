@@ -21,7 +21,7 @@ from loguru import logger
 router = APIRouter()
 
 # Storage directory for agent knowledge uploads
-KNOWLEDGE_DIR = Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) / "agent_knowledge"
+KNOWLEDGE_DIR = Path(os.getenv("AGENT_KNOWLEDGE_DIR", str(Path(__file__).parent.parent / "agent_knowledge")))
 KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".txt", ".xlsx"}

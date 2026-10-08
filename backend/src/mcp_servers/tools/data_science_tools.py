@@ -20,7 +20,7 @@ from loguru import logger
 from mcp_servers.core.mcp_tools import mcp_tool
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-_UPLOAD_DIR = Path(__file__).parent.parent.parent.parent / "uploads"
+_UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(Path(__file__).parent.parent.parent / "uploads")))
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Sandbox config ────────────────────────────────────────────────────────────

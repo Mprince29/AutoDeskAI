@@ -37,8 +37,8 @@ def _verify_slack_signature(request_body: bytes, timestamp: str, signature: str)
     """
     signing_secret = os.getenv("SLACK_SIGNING_SECRET", "")
     if not signing_secret:
-        logger.warning("SLACK_SIGNING_SECRET not set — skipping Slack signature verification")
-        return True  # fail open when not configured so existing setups don't break
+        logger.error("SLACK_SIGNING_SECRET is not configured — rejecting webhook")
+        return False
 
     # Reject requests older than 5 minutes (replay protection)
     try:
@@ -58,7 +58,7 @@ def _verify_slack_signature(request_body: bytes, timestamp: str, signature: str)
 def _verify_telegram_secret(header_token: str, stored_secret: str) -> bool:
     """Verify X-Telegram-Bot-Api-Secret-Token header value."""
     if not stored_secret:
-        return True  # not configured for this user — allow (backward compat)
+        return False
     return hmac.compare_digest(header_token or "", stored_secret)
 
 

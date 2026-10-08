@@ -45,6 +45,9 @@ class SendEmailRequest(BaseModel):
     thread_id: Optional[str] = None
     # List of Google Doc/Drive file IDs to attach as PDFs
     attachment_doc_ids: Optional[List[str]] = None
+    # Internal marker used by the durable external-action ledger. It is not
+    # exposed in the MCP schema and is absent for direct API sends.
+    action_marker: Optional[str] = None
 
 
 class ModifyLabelsRequest(BaseModel):
@@ -149,6 +152,7 @@ def _build_raw_message(
     body: str,
     thread_id: Optional[str] = None,
     attachments: Optional[List[tuple[bytes, str]]] = None,
+    action_marker: Optional[str] = None,
 ) -> str:
     """Build a base64url-encoded RFC 2822 message, optionally with PDF attachments.
 
@@ -172,7 +176,11 @@ def _build_raw_message(
     msg["to"] = to
     msg["subject"] = subject
     msg["date"] = formatdate(time.time(), localtime=True)
-    msg["message-id"] = f"<{int(time.time())}@gmail.com>"
+    if action_marker:
+        msg["message-id"] = f"<autodeskai-{action_marker}@autodeskai.local>"
+        msg["X-AutoDeskAI-Action"] = action_marker
+    else:
+        msg["message-id"] = f"<{int(time.time())}@gmail.com>"
 
     if thread_id:
         ref = f"<{thread_id}@gmail.com>"
@@ -344,6 +352,7 @@ async def send_email(req: SendEmailRequest):
     raw = _build_raw_message(
         req.to, req.subject, req.body, req.thread_id,
         attachments=attachments or None,
+        action_marker=req.action_marker,
     )
     sent = await execute_with_retry_async(
         service.users().messages().send(userId="me", body={"raw": raw})
@@ -354,6 +363,36 @@ async def send_email(req: SendEmailRequest):
         "messageId": sent["id"],
         "threadId": sent["threadId"],
         "attachments_sent": attached_count,
+    }
+
+
+async def find_email_by_action_marker(user_email: str, action_marker: str) -> Optional[Dict[str, str]]:
+    """Find a previously accepted send without sending anything.
+
+    Gmail indexes the RFC 2822 Message-ID, so the deterministic marker can be
+    used to verify a provider-side send after a local timeout/cancellation.
+    A missing result is deliberately inconclusive; callers must keep the
+    action in ``unknown`` rather than retrying.
+    """
+    if not action_marker or not re.fullmatch(r"[0-9a-f]{32}", action_marker):
+        raise ValueError("Invalid external-action marker")
+
+    service, _ = await GoogleAuthManager.get_service_async("gmail", "v1", user_email)
+    message_id = f"<autodeskai-{action_marker}@autodeskai.local>"
+    results = await execute_with_retry_async(
+        service.users().messages().list(
+            userId="me",
+            q=f"rfc822msgid:{message_id}",
+            maxResults=1,
+        )
+    )
+    messages = results.get("messages") or []
+    if not messages:
+        return None
+    message = messages[0]
+    return {
+        "messageId": message["id"],
+        "threadId": message.get("threadId", ""),
     }
 
 

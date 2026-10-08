@@ -92,18 +92,29 @@ class AgentCache:
     Provides instant playback for repeated queries.
     """
     PREFIX = "agent_cache"
+    KEY_VERSION = "v2"
+
+    @staticmethod
+    def _is_read_only_query(query: str) -> bool:
+        """Never cache requests that could cause or describe a mutation."""
+        q = query.lower()
+        mutation_terms = (
+            "send", "delete", "remove", "create", "update", "edit", "move",
+            "cancel", "schedule", "post", "write", "save", "approve", "execute",
+        )
+        return not any(term in q for term in mutation_terms)
 
     @classmethod
     def _make_key(cls, user_email: str, agent_type: str, query: str) -> str:
         # Clean query: lowercase and strip to improve hit rate
         clean_query = query.lower().strip()
-        raw = f"{user_email}:{agent_type}:{clean_query}"
+        raw = f"{cls.KEY_VERSION}:{user_email}:{agent_type}:{clean_query}"
         h = hashlib.md5(raw.encode()).hexdigest()
         return f"{cls.PREFIX}:{h}"
 
     @classmethod
     async def get(cls, user_email: str, agent_type: str, query: str) -> Optional[Dict[str, Any]]:
-        if redis_client is None: return None
+        if redis_client is None or not cls._is_read_only_query(query): return None
         key = cls._make_key(user_email, agent_type, query)
         try:
             data = await redis_client.get(key)
@@ -116,11 +127,10 @@ class AgentCache:
 
     @classmethod
     async def set(cls, user_email: str, agent_type: str, query: str, result: Dict[str, Any], ttl: int = 300):
-        if redis_client is None: return
+        if redis_client is None or not cls._is_read_only_query(query): return
         key = cls._make_key(user_email, agent_type, query)
         try:
             await redis_client.setex(key, ttl, json.dumps(result))
             logger.debug(f"🤖 Agent Cache SET: {agent_type} | {user_email}")
         except Exception as e:
             logger.warning(f"AgentCache.set error: {e}")
-

@@ -1,6 +1,8 @@
 import json
 import asyncio
 import time as _time
+import hashlib
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Callable, Optional
 from loguru import logger
 from services.security import GLOBAL_SIGNER
@@ -122,8 +124,50 @@ def _fire_log(tool_name: str, user_email: str, tool_input: dict, result: dict,
         pass  # No running event loop (e.g. sync test context) - skip logging
 
 
+def _get_action_user_id(db_session, user_email: str) -> int:
+    from auth.models import User
+    user = db_session.query(User).filter(User.email == user_email).first()
+    if not user:
+        raise ValueError("User not found for external action")
+    return user.id
+
+
+def _extract_provider_reference(result: Any) -> Optional[str]:
+    """Extract a provider-owned identifier from a successful tool response.
+
+    Connectors use different naming conventions (Gmail uses ``messageId``,
+    while other providers commonly return ``id`` or ``event_id``).  Keeping
+    this normalization at the ledger boundary lets the action record retain a
+    reconciliation handle without requiring every connector to know about
+    ``ExternalAction``.
+
+    This is intentionally limited to scalar top-level fields.  We must not
+    guess at nested application data and accidentally persist a local ID as a
+    provider reference.
+    """
+    if not isinstance(result, dict):
+        return None
+
+    for key in (
+        "provider_reference",
+        "providerReference",
+        "messageId",
+        "message_id",
+        "eventId",
+        "event_id",
+        "resourceId",
+        "resource_id",
+        "id",
+    ):
+        value = result.get(key)
+        if isinstance(value, (str, int)) and str(value):
+            return str(value)
+    return None
+
+
 async def execute_tool(
-    tool_name: str, tool_input: dict, user_email: str, db_session
+    tool_name: str, tool_input: dict, user_email: str, db_session,
+    agent_task_id: Optional[int] = None,
 ) -> dict:
     """Dispatch a tool call to its registered handler.
 
@@ -138,11 +182,12 @@ async def execute_tool(
         return {"error": f"Unknown tool: {tool_name}"}
 
     # Phase 10: Cryptographic Scoping Check
-    if tool_name in SENSITIVE_TOOLS:
+    if tool_name in SENSITIVE_TOOLS or entry.get("approval_required", False):
         signature = tool_input.pop("_security_signature", None)
+        signed_params = GLOBAL_SIGNER.canonical_params(tool_input)
         authorized = (
-            GLOBAL_SIGNER.verify_token(signature, tool_name, {}, user_email) or
-            GLOBAL_SIGNER.verify_token(signature, "agent_chat", {}, user_email)
+            GLOBAL_SIGNER.verify_token(signature, tool_name, signed_params, user_email) or
+            GLOBAL_SIGNER.verify_token(signature, "agent_chat", signed_params, user_email)
         )
         if not authorized:
             logger.warning(f"Security Block: Agent attempted to execute sensitive tool '{tool_name}' without a valid HMAC signature.")
@@ -159,12 +204,64 @@ async def execute_tool(
                         f"---\n **Send this email?** Reply 'yes', 'confirm', or 'send it' to proceed."
                     )
             blocked_result = {
+                "blocked": True,
+                "action_executed": False,
+                "user_message": (
+                    "The email was not sent because confirmation was not accepted. "
+                    "Reply 'yes', 'confirm', or 'send it' to approve the draft."
+                ),
                 "error": (
                     f"Security Block: The tool '{tool_name}' requires explicit user confirmation before it can run. "
                     f"Show the complete email draft to the user (To / Subject / Body) and ask ' Send this email?'. "
                     f"Do NOT say 'I was unable to send'. Instead, display the draft and await confirmation.{_draft_hint}"
                 )
             }
+            # A chat approval is a durable action, not just an LLM message.
+            # Store the exact attempted email so the UI can edit/approve this
+            # payload without asking the model to reconstruct it later.
+            if tool_name == "send_email":
+                try:
+                    from models import ExternalAction
+                    from sqlalchemy.exc import IntegrityError
+                    clean_email = {
+                        k: v for k, v in tool_input.items()
+                        if k not in {"user_email", "db", "_security_signature"}
+                    }
+                    digest = hashlib.sha256(
+                        json.dumps(clean_email, sort_keys=True, default=str).encode()
+                    ).hexdigest()
+                    idem = f"tool-idem:v1:{user_email}:{tool_name}:{digest}"
+                    action_user_id = _get_action_user_id(db_session, user_email)
+                    if action_user_id:
+                        action = db_session.query(ExternalAction).filter(
+                            ExternalAction.idempotency_key == idem,
+                            ExternalAction.user_id == action_user_id,
+                        ).first()
+                        if action is None:
+                            action = ExternalAction(
+                                user_id=action_user_id,
+                                tool_name=tool_name,
+                                provider=entry.get("provider"),
+                                idempotency_key=idem,
+                                request_hash=digest,
+                                status="awaiting_approval",
+                                request_payload=clean_email,
+                            )
+                            db_session.add(action)
+                            try:
+                                db_session.commit()
+                            except IntegrityError:
+                                db_session.rollback()
+                                action = db_session.query(ExternalAction).filter(
+                                    ExternalAction.idempotency_key == idem,
+                                ).first()
+                        if action is not None and action.status == "awaiting_approval":
+                            blocked_result["approval_id"] = action.id
+                            blocked_result["approval_payload"] = clean_email
+                            blocked_result["approval_required"] = True
+                except Exception as approval_error:
+                    db_session.rollback()
+                    logger.warning(f"Could not persist email approval: {approval_error}")
             _fire_log(tool_name, user_email, tool_input, blocked_result,
                       was_blocked=True, duration_ms=(_time.monotonic() - _call_start) * 1000)
             return blocked_result
@@ -176,13 +273,131 @@ async def execute_tool(
         #   non-sensitive tools never declare it, so it must always be removed.
         _META_KEYS = {"user_email", "db", "_security_signature"}
         clean_input = {k: v for k, v in tool_input.items() if k not in _META_KEYS}
+
+        # Connector-wide idempotency for approved mutations. This protects
+        # retries and duplicate workers without adding logic to every connector.
+        idempotency_key = None
+        redis_client = None
+        external_action = None
+        if tool_name in SENSITIVE_TOOLS or entry.get("approval_required", False):
+            digest = hashlib.sha256(json.dumps(clean_input, sort_keys=True, default=str).encode()).hexdigest()
+            idempotency_key = f"tool-idem:v1:{user_email}:{tool_name}:{digest}"
+
+            # Check durable action state before Redis. A completed action must
+            # remain deduplicated even after Redis eviction or outage.
+            if agent_task_id is not None or _get_action_user_id(db_session, user_email):
+                from models import ExternalAction
+                external_action = db_session.query(ExternalAction).filter(
+                    ExternalAction.idempotency_key == idempotency_key,
+                ).first()
+                if external_action is not None:
+                    if external_action.status == "succeeded":
+                        stored = external_action.result_payload or {"success": True}
+                        return {
+                            **stored,
+                            "external_action_id": external_action.id,
+                            "external_action_status": external_action.status,
+                        }
+                    if external_action.status in {"executing", "unknown"}:
+                        return {
+                            "error": "This external action has an unresolved outcome; reconcile it before retrying.",
+                            "external_action_id": external_action.id,
+                            "external_action_status": external_action.status,
+                        }
+
+            try:
+                from services.redis_service import get_redis
+                redis_client = get_redis()
+                if redis_client is None:
+                    return {"error": "Mutation safety store unavailable; action was not executed."}
+                # Task-backed mutations must pass through ExternalAction so
+                # the durable ledger remains authoritative. Redis results are
+                # only a compatibility optimization for legacy queue-only
+                # callers that do not have an AgentTask row.
+                if agent_task_id is None:
+                    cached = await redis_client.get(idempotency_key + ":result")
+                    if cached:
+                        return json.loads(cached)
+                acquired = await redis_client.set(idempotency_key + ":lock", "1", ex=300, nx=True)
+                if not acquired:
+                    return {"error": "This action is already executing; retry after it completes."}
+            except Exception as idem_error:
+                logger.debug(f"Idempotency store unavailable: {idem_error}")
+                return {"error": "Mutation safety store unavailable; action was not executed."}
+
+            # PostgreSQL is the durable correctness boundary. Redis above is
+            # only a short-lived concurrency/cache aid.
+            if agent_task_id is not None:
+                if external_action is not None:
+                    external_action.attempt_count = (external_action.attempt_count or 0) + 1
+                else:
+                    from models import ExternalAction
+                    external_action = ExternalAction(
+                        agent_task_id=agent_task_id,
+                        user_id=_get_action_user_id(db_session, user_email),
+                        tool_name=tool_name,
+                        provider=entry.get("provider"),
+                        idempotency_key=idempotency_key,
+                        request_hash=idempotency_key.rsplit(":", 1)[-1],
+                        status="executing",
+                        request_payload=clean_input,
+                        attempt_count=1,
+                        started_at=datetime.now(timezone.utc),
+                    )
+                    db_session.add(external_action)
+                external_action.status = "executing"
+                db_session.commit()
+
+        handler_input = dict(clean_input)
+        # The marker is internal execution metadata. It is not part of the
+        # signed/user-visible tool schema, but lets Gmail reconcile a request
+        # whose provider response was lost after the send was accepted.
+        if idempotency_key and tool_name == "send_email":
+            handler_input["_action_marker"] = hashlib.sha256(
+                idempotency_key.encode()
+            ).hexdigest()[:32]
         result = await entry["handler"](
-            user_email=user_email, db=db_session, **clean_input
+            user_email=user_email, db=db_session, **handler_input
         )
+        if idempotency_key and redis_client is not None and isinstance(result, dict) and not result.get("error"):
+            await redis_client.set(idempotency_key + ":result", json.dumps(result, default=str), ex=3600)
+            await redis_client.delete(idempotency_key + ":lock")
+        if external_action is not None:
+            external_action.status = "failed" if isinstance(result, dict) and result.get("error") else "succeeded"
+            external_action.result_payload = result if isinstance(result, dict) else {"result": str(result)}
+            external_action.error_message = result.get("error") if isinstance(result, dict) else None
+            if external_action.status == "succeeded":
+                external_action.provider_reference = _extract_provider_reference(result)
+            external_action.completed_at = datetime.now(timezone.utc)
+            db_session.commit()
+            if isinstance(result, dict):
+                result = {**result, "external_action_id": external_action.id, "external_action_status": external_action.status}
+        if idempotency_key and redis_client is not None:
+            try:
+                await redis_client.delete(idempotency_key + ":lock")
+            except Exception:
+                pass
         _fire_log(tool_name, user_email, tool_input, result,
                   was_blocked=False, duration_ms=(_time.monotonic() - _call_start) * 1000)
         return result
+    except asyncio.CancelledError:
+        if external_action is not None:
+            external_action.status = "unknown"
+            external_action.unknown_reason = "Local execution cancelled while provider outcome was unresolved."
+            external_action.completed_at = datetime.now(timezone.utc)
+            db_session.commit()
+        if idempotency_key and redis_client is not None:
+            try:
+                await redis_client.delete(idempotency_key + ":lock")
+            except Exception:
+                pass
+        raise
     except Exception as e:
+        if idempotency_key and redis_client is not None:
+            try:
+                await redis_client.delete(idempotency_key + ":lock")
+            except Exception:
+                pass
         from fastapi import HTTPException
         error_msg = str(e)
 
@@ -199,6 +414,15 @@ async def execute_tool(
 
         logger.error(f"Tool '{tool_name}' raised: {error_msg}")
         err_result = {"error": f"Tool '{tool_name}' failed: {error_msg}"}
+        if external_action is not None:
+            external_action.status = "failed"
+            external_action.error_message = err_result["error"]
+            external_action.completed_at = datetime.now(timezone.utc)
+            db_session.commit()
+            err_result.update({
+                "external_action_id": external_action.id,
+                "external_action_status": external_action.status,
+            })
         _fire_log(tool_name, user_email, tool_input, err_result,
                   was_blocked=False, duration_ms=(_time.monotonic() - _call_start) * 1000)
         return err_result
@@ -542,6 +766,7 @@ async def tool_send_email(
     body: str,
     thread_id: str = None,
     attachment_doc_ids: list = None,
+    _action_marker: str = None,
 ) -> dict:
     from mcp_servers.tools.gmail_tools import send_email, SendEmailRequest
     req = SendEmailRequest(
@@ -551,6 +776,7 @@ async def tool_send_email(
         body=body,
         thread_id=thread_id,
         attachment_doc_ids=attachment_doc_ids,
+        action_marker=_action_marker,
     )
     return await send_email(req)
 

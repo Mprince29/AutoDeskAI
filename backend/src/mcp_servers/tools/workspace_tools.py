@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from auth.database import get_db
+from auth.routes import get_current_user
+from auth.models import User
 from services.google_workspace_service import GoogleWorkspaceService
 from services.redis_service import cache_google_api
 from loguru import logger
@@ -27,11 +29,12 @@ async def _cached_list_workspace_assets(email: str, type: str, max_results: int,
 @router.get("/list")
 async def list_workspace_assets(
     type: Literal["sheets", "slides", "forms", "tasks", "drive", "docs"] = Query(..., description="Type of asset to list"),
-    email: str = Query(..., description="User email"),
     max_results: int = Query(50, description="Max results to return"),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Fetch the list of Google Workspace assets (Sheets, Slides, Forms, Tasks, or all Drive files)."""
+    email = user.email
     try:
         if type == "tasks":
             svc = GoogleWorkspaceService(email, db)
@@ -54,9 +57,10 @@ class TaskUpdate(BaseModel):
 async def update_workspace_task(
     task_id: str,
     update_data: TaskUpdate,
-    email: str = Query(..., description="User email"),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    email = user.email
     try:
         svc = GoogleWorkspaceService(email, db)
         return await svc.update_task(

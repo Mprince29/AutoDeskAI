@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth.database import get_db
+from auth.routes import get_current_user
 from auth.models import User, Document
 from utils.activity_logger import record_activity
 from loguru import logger
@@ -88,15 +89,13 @@ def _find_doc(doc_id: str, user_id: int, db: Session) -> Optional[Document]:
 
 @router.post("/upload")
 async def upload_document(
-    email: str,
     request: Request,
+    user: User = Depends(get_current_user),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
     """Upload a document - content compressed and stored entirely in DB."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    email = user.email
 
     from pathlib import Path
     ext = Path(file.filename).suffix.lower()
@@ -161,14 +160,10 @@ async def upload_document(
 async def delete_document(
     doc_id: str,
     request: Request,
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Delete a document from the DB."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     doc = _find_doc(doc_id, user.id, db)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -177,7 +172,7 @@ async def delete_document(
     db.commit()
 
     record_activity(
-        db, email, "delete_document",
+        db, user.email, "delete_document",
         entity_type="document", entity_id=doc_id,
         details={"filename": doc.filename},
         request=request
@@ -189,14 +184,10 @@ async def delete_document(
 @router.get("/parse/{doc_id}")
 async def parse_document(
     doc_id: str,
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Return pre-extracted text for an uploaded document (no filesystem access)."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     doc = _find_doc(doc_id, user.id, db)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -223,12 +214,8 @@ async def parse_document(
 
 
 @router.get("/list")
-async def list_documents(email: str, db: Session = Depends(get_db)):
+async def list_documents(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """List all documents uploaded by a user."""
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     docs = (
         db.query(Document)
         .filter(Document.user_id == user.id)

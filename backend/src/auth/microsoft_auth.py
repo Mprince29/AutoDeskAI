@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 
 from .database import get_db
 from .models import User
+from .routes import get_current_user
 from loguru import logger
+from services.security import create_oauth_state, verify_oauth_state
 
 # Try to import token decryption/encryption, fallback gracefully if not found
 try:
@@ -60,7 +62,7 @@ def microsoft_oauth_login(email: str = Query(...)):
     # We pass the user's email in the state parameter to link the account later
     auth_url = app.get_authorization_request_url(
         MS_SCOPES,
-        state=email,
+        state=create_oauth_state(email, "microsoft"),
         redirect_uri=REDIRECT_URI
     )
     
@@ -86,7 +88,9 @@ def microsoft_oauth_callback(
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code or state parameter.")
         
-    user_email = state # We passed the user email in the state param
+    user_email = verify_oauth_state(state, "microsoft")
+    if not user_email:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
     
     app = get_msal_app()
     REDIRECT_URI = os.environ.get("AZURE_REDIRECT_URI")
@@ -152,13 +156,9 @@ def microsoft_oauth_callback(
     return HTMLResponse(content=html_content)
 
 @router.post("/auth/microsoft/disconnect")
-def disconnect_microsoft(email: str = Query(...), db: Session = Depends(get_db)):
+def disconnect_microsoft(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Disconnects the Microsoft account by clearing tokens."""
     try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
         user.microsoft_access_token = None
         user.microsoft_refresh_token = None
         user.microsoft_token_expires_at = None

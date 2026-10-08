@@ -1,7 +1,9 @@
 import json
 import asyncio
+import inspect
 import os
-from typing import Dict, Any, List, Optional, Tuple
+import time
+from typing import Dict, Any, Awaitable, Callable, List, Optional, Tuple, Union
 from loguru import logger
 from litellm import acompletion
 from tenacity import (
@@ -12,6 +14,7 @@ from tenacity import (
 )
 
 from mcp_servers.core.mcp_tools import execute_tool, SENSITIVE_TOOLS
+from services.security import GLOBAL_SIGNER
 from services.context_audit import AUDIT_TRACKER
 from services.resilience import LLM_BREAKER
 import uuid
@@ -19,6 +22,58 @@ import uuid
 
 class EmptyLLMResponseError(Exception):
     """Raised when the LLM returns a response with no choices (e.g. safety filter block)."""
+
+
+async def _run_tool_with_cancellation(
+    tool_coro,
+    cancellation_check: Optional[Callable[[], Union[bool, Awaitable[bool]]]],
+    timeout: float = 45.0,
+):
+    """Wait for a tool while allowing cooperative cancellation.
+
+    A cancellation during a possible side effect is reported as ``unknown``.
+    The remote provider may have accepted the request before the local await
+    was cancelled, so callers must not retry it blindly.
+    """
+    task = asyncio.create_task(tool_coro)
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                raise asyncio.TimeoutError
+
+            done, _ = await asyncio.wait(
+                {task},
+                timeout=min(0.5, remaining),
+            )
+            if task in done:
+                return await task
+
+            if cancellation_check is not None:
+                cancelled = cancellation_check()
+                if inspect.isawaitable(cancelled):
+                    cancelled = await cancelled
+                if cancelled:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    return {
+                        "error": "Cancellation requested while the tool was executing.",
+                        "cancelled": True,
+                        "external_action_status": "unknown",
+                    }
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+        raise
 
 
 def _friendly_error(err: Exception) -> str:
@@ -129,6 +184,9 @@ class MCPClient:
     """
 
     MAX_ROUNDS: int = 10
+    MAX_TOOL_CALLS: int = 20
+    MAX_RUN_SECONDS: int = 300
+    MAX_TOTAL_TOKENS: int = 20000
     LLM_TIMEOUT: int = 60  # seconds per call
     _FALLBACK_MODEL: str = "openai/gpt-5.4-mini"
 
@@ -522,8 +580,13 @@ class MCPClient:
 
         thread_id = str(uuid.uuid4())
         AUDIT_TRACKER.init_thread(thread_id)
+        run_started = time.monotonic()
+        tool_call_count = 0
+        total_tokens = 0
 
         for round_num in range(self.MAX_ROUNDS):
+            if time.monotonic() - run_started >= self.MAX_RUN_SECONDS:
+                raise RuntimeError("Agent run exceeded the 5-minute execution limit.")
             logger.info(
                 f"Agentic Loop | round {round_num + 1}/{self.MAX_ROUNDS} | user={user_email}"
             )
@@ -556,6 +619,9 @@ class MCPClient:
                 final_text = self._inject_draft_markers(final_text, current_messages)
                 _usage = getattr(response, "usage", None)
                 _tokens = getattr(_usage, "total_tokens", 0) if _usage else 0
+                total_tokens += _tokens
+                if total_tokens > self.MAX_TOTAL_TOKENS:
+                    raise RuntimeError("Agent run exceeded the token budget.")
                 _model_used = getattr(response, "model", None) or model or "unknown"
                 try:
                     from models import UsageLog
@@ -579,6 +645,9 @@ class MCPClient:
                 return final_text, tools_used, thread_id
 
             for tc in message.tool_calls:
+                tool_call_count += 1
+                if tool_call_count > self.MAX_TOOL_CALLS:
+                    raise RuntimeError("Agent run exceeded the maximum tool-call limit.")
                 fn_name = tc.function.name
                 try:
                     args = json.loads(tc.function.arguments)
@@ -590,7 +659,11 @@ class MCPClient:
                 )
 
                 if fn_name in SENSITIVE_TOOLS and security_token:
-                    args["_security_signature"] = security_token
+                    # The route-level token represents explicit confirmation;
+                    # bind the resulting signature to this exact tool payload.
+                    args["_security_signature"] = GLOBAL_SIGNER.generate_token(
+                        fn_name, GLOBAL_SIGNER.canonical_params(args), user_email
+                    )
 
                 try:
                     result = await asyncio.wait_for(
@@ -599,6 +672,16 @@ class MCPClient:
                     )
                 except asyncio.TimeoutError:
                     result = {"error": f"Tool '{fn_name}' timed out after 45 seconds."}
+
+                # A security block is terminal for this run. Do not send the
+                # blocked result back to the LLM, because it may incorrectly
+                # claim that the sensitive action succeeded.
+                if isinstance(result, dict) and result.get("blocked"):
+                    return (
+                        result.get("user_message", "The requested action was not authorized."),
+                        tools_used,
+                        thread_id,
+                    )
 
                 if fn_name == "get_email" and "message_id" in args:
                     AUDIT_TRACKER.add_email_trace(thread_id, args.get("message_id"))
@@ -644,6 +727,8 @@ class MCPClient:
         model: Optional[str] = None,
         max_tokens: int = 8192,
         security_token: Optional[str] = None,
+        cancellation_check: Optional[Callable[[], Union[bool, Awaitable[bool]]]] = None,
+        agent_task_id: Optional[int] = None,
     ):
         """Streaming generator version of run() using the multi-tenant router."""
         from auth.models import User
@@ -660,8 +745,14 @@ class MCPClient:
 
         thread_id = str(uuid.uuid4())
         AUDIT_TRACKER.init_thread(thread_id)
+        run_started = time.monotonic()
+        tool_call_count = 0
+        total_tokens = 0
 
         for round_num in range(self.MAX_ROUNDS):
+            if time.monotonic() - run_started >= self.MAX_RUN_SECONDS:
+                yield {"type": "error", "message": "Agent run exceeded the 5-minute execution limit."}
+                return
             label = self._ROUND_LABELS[min(round_num, len(self._ROUND_LABELS) - 1)]
             yield {"type": "status", "message": label}
 
@@ -702,6 +793,10 @@ class MCPClient:
                 final_text = self._inject_draft_markers(final_text, current_messages)
                 _usage = getattr(response, "usage", None)
                 _tokens = getattr(_usage, "total_tokens", 0) if _usage else 0
+                total_tokens += _tokens
+                if total_tokens > self.MAX_TOTAL_TOKENS:
+                    yield {"type": "error", "message": "Agent run exceeded the token budget."}
+                    return
                 _model_used = getattr(response, "model", None) or model or "unknown"
 
                 # Persist to DB so the Settings usage widget has real server-side data
@@ -733,6 +828,10 @@ class MCPClient:
                 return
 
             for tc in message.tool_calls:
+                tool_call_count += 1
+                if tool_call_count > self.MAX_TOOL_CALLS:
+                    yield {"type": "error", "message": "Agent run exceeded the maximum tool-call limit."}
+                    return
                 fn_name = tc.function.name
                 try:
                     args = json.loads(tc.function.arguments)
@@ -743,15 +842,53 @@ class MCPClient:
                 yield {"type": "tool_call", "tool": fn_name, "display": display_label, "args": args}
 
                 if fn_name in SENSITIVE_TOOLS and security_token:
-                    args["_security_signature"] = security_token
+                    args["_security_signature"] = GLOBAL_SIGNER.generate_token(
+                        fn_name, GLOBAL_SIGNER.canonical_params(args), user_email
+                    )
 
                 try:
-                    result = await asyncio.wait_for(
-                        execute_tool(fn_name, args, user_email, db_session),
-                        timeout=45.0,  # Prevent a single tool call from hanging the server
+                    result = await _run_tool_with_cancellation(
+                        execute_tool(
+                            fn_name,
+                            args,
+                            user_email,
+                            db_session,
+                            agent_task_id=agent_task_id,
+                        ),
+                        cancellation_check,
+                        timeout=45.0,
                     )
                 except asyncio.TimeoutError:
                     result = {"error": f"Tool '{fn_name}' timed out after 45 seconds. Please try again."}
+
+                # A security block is terminal for this run. Do not send the
+                # blocked result back to the LLM, because it may incorrectly
+                # claim that the sensitive action succeeded.
+                if isinstance(result, dict) and result.get("blocked"):
+                    if result.get("approval_id"):
+                        yield {
+                            "type": "approval_required",
+                            "approval_id": result["approval_id"],
+                            "tool": fn_name,
+                            "payload": result.get("approval_payload", {}),
+                        }
+                    yield {
+                        "type": "result",
+                        "text": result.get("user_message", "The requested action was not authorized."),
+                        "tools_used": tools_used,
+                        "action_executed": False,
+                        "blocked": True,
+                        "context_trace_id": thread_id,
+                    }
+                    return
+
+                if isinstance(result, dict) and result.get("cancelled"):
+                    yield {
+                        "type": "cancelled",
+                        "message": result.get("error", "Cancellation requested."),
+                        "external_action_status": result.get("external_action_status", "unknown"),
+                    }
+                    return
 
                 if fn_name == "get_email" and "message_id" in args:
                     AUDIT_TRACKER.add_email_trace(thread_id, args.get("message_id"))

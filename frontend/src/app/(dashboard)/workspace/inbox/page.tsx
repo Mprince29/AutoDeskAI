@@ -80,7 +80,9 @@ export default function InboxPage() {
   useEffect(() => {
     if (!user?.email) return;
     const base = process.env.NEXT_PUBLIC_API_URL;
-    const es = new EventSource(`${base}/api/automated/updates?email=${encodeURIComponent(user.email)}`);
+    const accessToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    if (!accessToken) return;
+    const es = new EventSource(`${base}/api/automated/updates?token=${encodeURIComponent(accessToken)}`);
     const onUpdated = () => {
       if (!preferences?.gmail_connected) return;
       fetchNotifications(user.email);

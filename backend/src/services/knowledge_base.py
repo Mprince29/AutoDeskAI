@@ -26,6 +26,8 @@ class KnowledgeBase:
     _queue: asyncio.Queue = asyncio.Queue()
     _worker_task: Optional[asyncio.Task] = None
     _chroma_client = None
+    _session_factory = None
+    _queued_doc_ids: set[int] = set()
 
     @classmethod
     def get_chroma_client(cls):
@@ -43,7 +45,29 @@ class KnowledgeBase:
     def init_worker(cls, session_factory):
         """Initialize the single instance with a DB session factory."""
         if not cls._instance:
+            cls._session_factory = session_factory
             cls._instance = cls(session_factory())
+            # Recover jobs interrupted by an API restart. Indexed documents are
+            # left untouched; pending/processing documents are re-queued.
+            try:
+                from models import AgentKnowledgeDoc
+                rows = cls._instance.db.query(AgentKnowledgeDoc).filter(
+                    AgentKnowledgeDoc.status.in_(("pending", "processing"))
+                ).all()
+                for row in rows:
+                    if row.file_path:
+                        row.status = "pending"
+                        cls.enqueue_ingest(IngestJob(
+                            agent_id=row.agent_id,
+                            doc_id=row.id,
+                            file_path=Path(row.file_path),
+                            filename=row.filename,
+                            user_id=row.user_id,
+                        ))
+                if rows:
+                    cls._instance.db.commit()
+            except Exception as exc:
+                logger.warning(f"RAG recovery scan failed: {exc}")
 
     @classmethod
     async def start_worker(cls):
@@ -54,6 +78,9 @@ class KnowledgeBase:
     @classmethod
     def enqueue_ingest(cls, job: IngestJob):
         """Static entry point for routes to queue a job."""
+        if job.doc_id in cls._queued_doc_ids:
+            return
+        cls._queued_doc_ids.add(job.doc_id)
         cls._queue.put_nowait(job)
         logger.info(f"Enqueued RAG ingest for doc {job.doc_id}")
 
@@ -82,6 +109,8 @@ class KnowledgeBase:
                 
                 meta = results["metadatas"][0][i] if "metadatas" in results and results["metadatas"] and results["metadatas"][0] else {"agent_id": agent_id}
                 
+                if score < 0.15:
+                    continue
                 chunks.append({
                     "content": results["documents"][0][i],
                     "score": score,
@@ -103,7 +132,10 @@ class KnowledgeBase:
         header += "REFERENCE CONTEXT FROM UPLOADED KNOWLEDGE DOCUMENTS\n"
         header += "═══════════════════════════════════════════════════════════\n"
         
-        body = "\n\n".join([f"CONTEXT CHUNK:\n{c['content']}" for c in chunks])
+        body = "\n\n".join([
+            f"CONTEXT CHUNK (source: {c.get('source', 'Unknown')}, score: {c.get('score', 0):.2f}):\n{c['content']}"
+            for c in chunks
+        ])
         footer = "\n\n(End of reference context. Use this for style and factual guidance.)"
         
         return f"{header}{body}{footer}"
@@ -121,6 +153,7 @@ class KnowledgeBase:
                 logger.error(f"Failed to process document {job.doc_id}: {e}")
                 self._update_doc_status(job.doc_id, "failed", error_message=str(e))
             finally:
+                self._queued_doc_ids.discard(job.doc_id)
                 self._queue.task_done()
 
     async def _process_document(self, agent_id: int, doc_id: int, file_path: str):

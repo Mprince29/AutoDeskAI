@@ -2,6 +2,7 @@ from sqlalchemy import Column, Index, Integer, String, Text, DateTime, Boolean, 
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
+from sqlalchemy import UniqueConstraint
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, EmailStr, Field
 from auth.database import Base
@@ -80,6 +81,31 @@ class AgentTask(Base):
         # Agent dashboard: all tasks for an agent ordered by creation
         Index("ix_task_agent_created", "agent_id", "created_at"),
     )
+
+
+class ExternalAction(Base):
+    """Durable state for an external side effect initiated by an AgentTask."""
+    __tablename__ = "external_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_task_id = Column(Integer, ForeignKey("agent_tasks.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    tool_name = Column(String(100), nullable=False, index=True)
+    provider = Column(String(50), nullable=True)
+    idempotency_key = Column(String(500), nullable=False, unique=True, index=True)
+    request_hash = Column(String(64), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    request_payload = Column(JSON, nullable=True)
+    result_payload = Column(JSON, nullable=True)
+    provider_reference = Column(String(500), nullable=True, index=True)
+    error_message = Column(Text, nullable=True)
+    unknown_reason = Column(Text, nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    task = relationship("AgentTask", backref="external_actions")
 
 class WorkflowTemplate(Base):
     __tablename__ = "workflow_templates"
@@ -183,6 +209,14 @@ class WorkflowStep(Base):
 
     requires_approval = Column(Boolean, default=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approval_expires_at = Column(DateTime(timezone=True), nullable=True)
+    approval_payload_hash = Column(String(64), nullable=True)
+    execution_nonce = Column(String(64), nullable=True, unique=True)
+
+    __table_args__ = (
+        Index("ix_workflow_step_workflow_status", "workflow_id", "status"),
+    )
 
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)

@@ -29,6 +29,7 @@ from auth.models import User
 from auth.routes import get_current_user
 from utils.company import is_company_user
 from loguru import logger
+from services.security import create_oauth_state, verify_oauth_state, oauth_state_platform
 
 router = APIRouter()
 
@@ -153,9 +154,7 @@ async def connect_platform(
                 detail=f"{platform} OAuth not configured on this server (missing {config['client_id_env']})"
             )
 
-        # state = email:platform:nonce  (colon-separated, base64-safe chars only)
-        nonce = secrets.token_urlsafe(12)
-        state = f"{email}:{platform}:{nonce}"
+        state = create_oauth_state(email, platform)
 
         scopes = config.get("scopes", [])
         params: Dict[str, Any] = {
@@ -224,8 +223,7 @@ async def authorize_platform(
                 status_code=503,
                 detail="Trello not configured on this server (missing TRELLO_API_KEY)"
             )
-        nonce = secrets.token_urlsafe(12)
-        state = f"{email}:trello:{nonce}"
+        state = create_oauth_state(email, "trello")
         callback_url = f"{BACKEND_URL}/api/integrations/callback?state={state}"
         params = {
             "key": api_key,
@@ -267,11 +265,14 @@ async def oauth_callback(
     if not code or not state:
         return HTMLResponse(_oauth_result_html(False, "Missing code or state", ""))
 
-    parts = state.split(":")
-    if len(parts) < 2:
+    # Platform is carried inside the signed state; do not trust raw callback data.
+    platform_hint = oauth_state_platform(state) or ""
+    if not platform_hint:
         return HTMLResponse(_oauth_result_html(False, "Invalid state", ""))
-
-    email, platform = parts[0], parts[1]
+    email = verify_oauth_state(state, platform_hint)
+    platform = platform_hint
+    if not email:
+        return HTMLResponse(_oauth_result_html(False, "Invalid or expired state", platform))
 
     config = get_platform(platform)
     if not config or config["auth_type"] != "oauth2":

@@ -23,6 +23,8 @@ from typing import List, Optional
 from datetime import datetime
 
 from auth.database import get_db
+from auth.routes import get_current_user
+from auth.models import User
 from models import AgentSkill, AgentSkillPin, AgentEvalLog, AIAgent
 
 router = APIRouter()
@@ -65,7 +67,7 @@ class SkillOut(BaseModel):
 @router.post("", response_model=SkillOut)
 def create_skill(
     body: SkillCreate,
-    email: str = Query(..., description="Owner email"),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     skill = AgentSkill(
@@ -73,7 +75,7 @@ def create_skill(
         description=body.description,
         instructions=body.instructions,
         domain=body.domain,
-        owner_email=email,
+        owner_email=user.email,
         is_shared=body.is_shared,
     )
     db.add(skill)
@@ -84,14 +86,14 @@ def create_skill(
 
 @router.get("", response_model=List[SkillOut])
 def list_skills(
-    email: str = Query(..., description="Requesting user email"),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Return own skills + all shared skills."""
     skills = (
         db.query(AgentSkill)
         .filter(
-            (AgentSkill.owner_email == email) | (AgentSkill.is_shared == True)
+            (AgentSkill.owner_email == user.email) | (AgentSkill.is_shared == True)
         )
         .order_by(AgentSkill.created_at.desc())
         .all()
@@ -103,13 +105,13 @@ def list_skills(
 def update_skill(
     skill_id: int,
     body: SkillUpdate,
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     skill = db.query(AgentSkill).filter(AgentSkill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    if skill.owner_email != email:
+    if skill.owner_email != user.email:
         raise HTTPException(status_code=403, detail="Not your skill")
     for field_name, value in body.model_dump(exclude_none=True).items():
         setattr(skill, field_name, value)
@@ -121,13 +123,13 @@ def update_skill(
 @router.delete("/{skill_id}")
 def delete_skill(
     skill_id: int,
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     skill = db.query(AgentSkill).filter(AgentSkill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    if skill.owner_email != email:
+    if skill.owner_email != user.email:
         raise HTTPException(status_code=403, detail="Not your skill")
     db.delete(skill)
     db.commit()
@@ -140,7 +142,7 @@ def delete_skill(
 def pin_skill(
     skill_id: int,
     agent_id: int,
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     skill = db.query(AgentSkill).filter(AgentSkill.id == skill_id).first()
@@ -168,7 +170,7 @@ def pin_skill(
 def unpin_skill(
     skill_id: int,
     agent_id: int,
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     pin = (
@@ -197,14 +199,14 @@ def skills_for_agent(
 
 @router.get("/evals/trend")
 def eval_trend(
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     limit: int = Query(default=30, le=200),
     db: Session = Depends(get_db),
 ):
     """Return the last N eval scores ordered ascending — for drawing a trend line."""
     rows = (
         db.query(AgentEvalLog)
-        .filter(AgentEvalLog.user_email == email)
+        .filter(AgentEvalLog.user_email == user.email)
         .order_by(AgentEvalLog.created_at.desc())
         .limit(limit)
         .all()
@@ -225,13 +227,13 @@ def eval_trend(
 
 @router.get("/evals/recent")
 def eval_recent(
-    email: str = Query(...),
+    user: User = Depends(get_current_user),
     limit: int = Query(default=10, le=50),
     db: Session = Depends(get_db),
 ):
     rows = (
         db.query(AgentEvalLog)
-        .filter(AgentEvalLog.user_email == email)
+        .filter(AgentEvalLog.user_email == user.email)
         .order_by(AgentEvalLog.created_at.desc())
         .limit(limit)
         .all()

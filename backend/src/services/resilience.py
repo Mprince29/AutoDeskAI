@@ -107,7 +107,8 @@ async def retry_with_backoff(
     **kwargs,
 ) -> Any:
     """
-    Retry fn(*args, **kwargs) up to max_retries times with exponential backoff + jitter.
+    Retry fn(*args, **kwargs) up to max_retries retries (max_retries + 1 total attempts)
+    with exponential backoff + jitter.
 
     Delay schedule: 1s, 2s, 4s (+ up to 0.5s jitter each).
     Only retries on retryable_exceptions. Re-raises on final attempt.
@@ -115,6 +116,8 @@ async def retry_with_backoff(
     import httpx
 
     retryable = retryable_exceptions if retryable_exceptions != (Exception,) else (
+        asyncio.TimeoutError,
+        TimeoutError,
         httpx.TimeoutException,
         httpx.HTTPStatusError,
         httpx.ConnectError,
@@ -122,12 +125,12 @@ async def retry_with_backoff(
     )
 
     last_exc = None
-    for attempt in range(max_retries):
+    for attempt in range(max_retries + 1):
         try:
             return await fn(*args, **kwargs)
         except retryable as e:
             last_exc = e
-            if attempt == max_retries - 1:
+            if attempt == max_retries:
                 raise
             delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
             logger.debug(f"retry_with_backoff: attempt {attempt + 1} failed ({e}), retrying in {delay:.1f}s")

@@ -8,7 +8,7 @@ import { Loader2 } from "lucide-react";
 function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login, user: currentUser } = useAuth();
+  const { login } = useAuth();
 
   useEffect(() => {
     const token = searchParams.get("token");
@@ -19,20 +19,21 @@ function AuthCallbackContent() {
       return;
     }
 
-    // If we already have a user in context, we've successfully logged in
-    if (currentUser) {
-      router.push("/chat");
-      return;
-    }
-
     try {
       const user = JSON.parse(userJson);
+      // Always persist the callback token. A stale user object may already be
+      // in memory while its access token is missing or expired.
+      localStorage.setItem("access_token", token);
+      localStorage.setItem("user_info", JSON.stringify(user));
       login(user, token);
+      // Force a clean provider initialization so the first API request reads
+      // the newly stored bearer token instead of racing the client transition.
+      window.location.replace("/chat");
     } catch (e) {
       console.error("Failed to parse user during SSO:", e);
       router.push("/auth?error=sso_failed");
     }
-  }, [searchParams, login, router, currentUser]);
+  }, [searchParams, login, router]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background">

@@ -2,12 +2,16 @@ import hmac
 import hashlib
 import os
 import json
+import base64
+import time
 from typing import Dict, Any, Optional
 from loguru import logger
 
-# Phase 10: Cryptographic Scoping Secret
-# In production, this would be a rotated secret from a KMS.
-SECURITY_SECRET = os.getenv("AGENT_SECURITY_SECRET", "super-secret-agent-key-2026")
+# Sensitive-action signing must never have a source-code fallback.
+SECURITY_SECRET = os.getenv("AGENT_SECURITY_SECRET")
+if not SECURITY_SECRET and os.getenv("ENVIRONMENT", "development").lower() == "production":
+    raise RuntimeError("AGENT_SECURITY_SECRET is required in production")
+SECURITY_SECRET = SECURITY_SECRET or "development-only-agent-key"
 
 class ActionSigner:
     """
@@ -39,6 +43,11 @@ class ActionSigner:
         return signature
 
     @staticmethod
+    def canonical_params(params: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove transport metadata before signing/verifying tool arguments."""
+        return {k: v for k, v in params.items() if k != "_security_signature"}
+
+    @staticmethod
     def verify_token(token: str, action: str, params: Dict[str, Any], user_email: str) -> bool:
         """
         Verify that a provided token matches the action/params/user.
@@ -60,3 +69,35 @@ class ActionSigner:
 
 # Global instance for easy access
 GLOBAL_SIGNER = ActionSigner()
+
+
+def create_oauth_state(user_email: str, platform: str) -> str:
+    """Create a short-lived, tamper-evident OAuth state value."""
+    payload = {"email": user_email, "platform": platform, "iat": int(time.time()), "nonce": os.urandom(16).hex()}
+    raw = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+    sig = hmac.new(SECURITY_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+    return f"{raw}.{sig}"
+
+
+def verify_oauth_state(state: str, platform: str, max_age: int = 600) -> Optional[str]:
+    try:
+        raw, sig = state.split(".", 1)
+        expected = hmac.new(SECURITY_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        padded = raw + "=" * (-len(raw) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+        if payload.get("platform") != platform or int(time.time()) - int(payload.get("iat", 0)) > max_age:
+            return None
+        return payload.get("email")
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, OSError):
+        return None
+
+
+def oauth_state_platform(state: str) -> Optional[str]:
+    try:
+        raw = state.split(".", 1)[0]
+        padded = raw + "=" * (-len(raw) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded).decode()).get("platform")
+    except (ValueError, TypeError, json.JSONDecodeError, OSError):
+        return None

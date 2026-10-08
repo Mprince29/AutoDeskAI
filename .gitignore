@@ -30,6 +30,9 @@ out/
 /dist
 *.egg-info/
 
+# Local analysis output
+graphify-out/
+
 # Misc
 .DS_Store
 *.pem
@@ -44,6 +47,7 @@ lerna-debug.log*
 
 # Environment files
 .env*
+!.env.example
 .env.local
 .env.development.local
 .env.test.local

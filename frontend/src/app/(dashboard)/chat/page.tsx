@@ -61,6 +61,18 @@ import { useAgentStore } from "@/store/agentStore";
 import { Agent, Message } from "@/types/agent.types";
 import { cn } from "@/lib/utils";
 
+type TaskNotification = {
+  id: number;
+  task_title: string;
+  result_summary: string | null;
+  created_at: string;
+};
+
+type PendingTaskNotificationsResponse = {
+  notifications: TaskNotification[];
+  total: number;
+};
+
 
 function DashboardContent() {
   const { user, preferences } = useAuth();
@@ -93,7 +105,7 @@ function DashboardContent() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Tab-return notifications - shown when user comes back after being away
-  const [returnNotifs, setReturnNotifs] = useState<{ id: number; task_title: string; result_summary: string | null; created_at: string }[]>([]);
+  const [returnNotifs, setReturnNotifs] = useState<TaskNotification[]>([]);
   const hiddenAtRef = useRef<number | null>(null); // timestamp (ms) when tab became hidden
 
   // Modals
@@ -223,12 +235,10 @@ function DashboardContent() {
       hiddenAtRef.current = null;
 
       try {
-        const res = await fetch(
-          `${API_BASE}/api/notifications/pending?email=${encodeURIComponent(email)}`,
-          { credentials: 'include' }
+        const data = await apiService.request<PendingTaskNotificationsResponse>(
+          `/api/notifications/pending?email=${encodeURIComponent(email)}`,
+          { silent: true }
         );
-        if (!res.ok) return;
-        const data = await res.json();
         if (data.notifications?.length) {
           setReturnNotifs(data.notifications);
         }
@@ -450,6 +460,19 @@ function DashboardContent() {
         agent_id: selectedAgent?.id ? parseInt(selectedAgent.id) || undefined : undefined,
         session_id: currentSessionId,
       }, (event) => {
+        if (event.type === 'approval_required') {
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.type === 'agent' && last.isStreaming) {
+              return [...prev.slice(0, -1), {
+                ...last,
+                approvalId: event.approval_id,
+                approvalPayload: event.payload,
+              }];
+            }
+            return prev;
+          });
+        }
         if (event.type === 'agent') {
           // Agent selection announced
         }
@@ -587,11 +610,10 @@ function DashboardContent() {
 
   const dismissReturnNotifs = async () => {
     if (!user?.email || returnNotifs.length === 0) return;
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL;
     try {
-      await fetch(
-        `${API_BASE}/api/notifications/seen-all?email=${encodeURIComponent(user.email)}`,
-        { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }
+      await apiService.request(
+        `/api/notifications/seen-all?email=${encodeURIComponent(user.email)}`,
+        { method: 'POST', silent: true }
       );
     } catch { /* non-critical */ }
     setReturnNotifs([]);
@@ -717,6 +739,13 @@ function DashboardContent() {
             hasAgents={agents.length > 0}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+            onApproveEmail={async (approvalId, draft) => {
+              const result = await apiService.approveEmailApproval(approvalId, draft);
+              setMessages(prev => prev.map(m => m.approvalId === approvalId
+                ? { ...m, approvalId: undefined, content: `${m.content}\n\n✅ Email sent successfully.` }
+                : m));
+              return result;
+            }}
           />
         </div>
 
